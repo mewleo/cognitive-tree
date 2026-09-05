@@ -1,0 +1,14 @@
+{
+  "name": "cognitive-tree",
+  "version": "0.2.0",
+  "description": "ODDM 认知树 - 个人认知生态系统样板程序",
+  "main": "src/KnowledgeTree.js",
+  "bin": {
+    "ctree": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "demo": "node src/cli.js"
+  },
+  "license": "Apache-2.0"
+}
