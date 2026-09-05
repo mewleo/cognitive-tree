@@ -12,6 +12,7 @@
  *   3. 认知结晶：suggestCrystallization（提议）/ crystallize（执行）
  *      —— 系统只提议，人做决定（主权在人）
  *   4. 跨干启发：discoverCrossLinks（基于隐性标签自动发现跨主干关联）
+ *      findCrossNodesByTags（按标签定向查找其他主干节点，供AI跨界启发）
  *   5. 快速通道：addNote（实节点/笔记）/ addIdea（虚节点/想法）
  *   6. 渲染输出：renderASCII（CLI 树形视图，化土节点灰色🍂淡化）
  *   7. 自省快照：introspect（对齐 ODDM introspect 理念，AI 操作入口）
@@ -27,55 +28,28 @@
  *   - axis 只能是 生/业/思，state 只能是 虚/实（由 KnowledgeNode 构造函数保证）
  *   - 结晶操作必须满足 canCrystallize() 条件
  *   - 跨干关联只在不同主干的节点间建立
- *
- * @example
- * const tree = new KnowledgeTree();
- * const node = tree.addNote('今天用ODDM重构了存储层', '业', ['解耦']);
- * tree.touchNode(node.node_id);           // 热力上升
- * tree.discoverCrossLinks();               // 发现跨干关联
- * console.log(tree.renderASCII());         // 渲染树形视图
- * const json = tree.toJSON();              // 序列化
- * const restored = KnowledgeTree.fromJSON(json);  // 反序列化
  */
 const { KnowledgeNode } = require('./KnowledgeNode');
 
 class KnowledgeTree {
-  /**
-   * 构造函数——初始化空树
-   * 使用 Map 存储节点，O(1) 查找
-   */
   constructor() {
     /** @type {Map<string, KnowledgeNode>} 节点存储，key=node_id */
     this.nodes = new Map();
   }
 
-  /**
-   * 添加节点
-   */
   addNode(node) {
     this.nodes.set(node.node_id, node);
     return node;
   }
 
-  /**
-   * 获取节点
-   */
   getNode(node_id) {
     return this.nodes.get(node_id) || null;
   }
 
-  /**
-   * 按主干坐标查询
-   * @param {'生'|'业'|'思'} axis
-   * @returns {KnowledgeNode[]}
-   */
   getByAxis(axis) {
     return Array.from(this.nodes.values()).filter(n => n.axis === axis);
   }
 
-  /**
-   * 获取某节点的直接子节点
-   */
   getChildren(parent_id) {
     const parent = this.getNode(parent_id);
     if (!parent) return [];
@@ -84,40 +58,22 @@ class KnowledgeTree {
       .filter(Boolean);
   }
 
-  /**
-   * 注意某个节点——热力上升
-   */
   touchNode(node_id) {
     const node = this.getNode(node_id);
     if (node) node.touch();
     return node;
   }
 
-  /**
-   * 全树自然衰减——时间流逝
-   */
   decayAll() {
     for (const node of this.nodes.values()) {
       node.decay();
     }
   }
 
-  /**
-   * 结晶提议——找到满足条件的底层节点
-   * 系统只提议，不自动执行（主权在人）
-   * @param {number} threshold - 需要的子节点数量
-   * @returns {KnowledgeNode[]}
-   */
   suggestCrystallization(threshold = 3) {
     return Array.from(this.nodes.values()).filter(n => n.canCrystallize(threshold));
   }
 
-  /**
-   * 执行结晶——将一个底层节点升维为高阶原理
-   * 必须显式调用，系统不会自动结晶
-   * @param {string} node_id
-   * @param {string} new_summary - 结晶后的高阶原理表述
-   */
   crystallize(node_id, new_summary) {
     const node = this.getNode(node_id);
     if (!node || !node.canCrystallize()) return null;
@@ -127,12 +83,7 @@ class KnowledgeTree {
     return node;
   }
 
-  /**
-   * 发现跨干关联——不同主干但有相同隐性标签的节点
-   * 基于隐性标签（复利/解耦/熵增...）触发跨界启发
-   */
   discoverCrossLinks() {
-    // 按隐性标签分组
     const tagGroups = new Map();
     for (const node of this.nodes.values()) {
       for (const tag of node.implicit_tags) {
@@ -140,8 +91,6 @@ class KnowledgeTree {
         tagGroups.get(tag).push(node);
       }
     }
-
-    // 同标签但不同主干的节点互相建立跨干关联
     for (const [, group] of tagGroups) {
       for (let i = 0; i < group.length; i++) {
         for (let j = i + 1; j < group.length; j++) {
@@ -152,18 +101,39 @@ class KnowledgeTree {
         }
       }
     }
-
     return Array.from(this.nodes.values()).filter(n => n.cross_links.length > 0);
   }
 
   /**
-   * 快速保存笔记——一键存入实节点
-   * 完整内容存 raw_source，summary 自动截断（树上显示简洁）
-   * @param {string} content - 笔记完整内容
-   * @param {string} [axis='业'] - 主干，默认业
-   * @param {string[]} [implicit_tags=[]] - 隐性标签
-   * @returns {KnowledgeNode}
+   * 基于隐性标签查找其他主干的相关节点（功能三：AI 跨界启发的前置步骤）
+   *
+   * 【设计意图】
+   * 用户输入瓶颈描述后，AI 解析出隐性标签，本方法用这些标签在其他主干中
+   * 找到有相同隐性标签的节点，作为跨界启发的素材。
+   *
+   * 【与 discoverCrossLinks 的区别】
+   * - discoverCrossLinks：自动建立所有同标签跨干节点的 cross_link（全量）
+   * - findCrossNodesByTags：按指定标签+排除主干查找，返回按热力排序的节点列表（定向查询）
+   *
+   * @param {string[]} tags - 隐性标签列表
+   * @param {string} excludeAxis - 排除的主干（瓶颈所在主干，不返回同主干节点）
+   * @param {number} [limit=5] - 返回数量上限
+   * @returns {KnowledgeNode[]} 按热力降序排列的相关节点
    */
+  findCrossNodesByTags(tags, excludeAxis, limit = 5) {
+    if (!Array.isArray(tags) || tags.length === 0) return [];
+    const tagSet = new Set(tags);
+    const result = [];
+    for (const node of this.nodes.values()) {
+      if (node.axis === excludeAxis) continue;
+      if (node.implicit_tags.some(t => tagSet.has(t))) {
+        result.push(node);
+      }
+    }
+    result.sort((a, b) => b.heat_score - a.heat_score);
+    return result.slice(0, limit);
+  }
+
   addNote(content, axis = '业', implicit_tags = []) {
     const id = 'note_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     const node = new KnowledgeNode({
@@ -179,12 +149,6 @@ class KnowledgeTree {
     return node;
   }
 
-  /**
-   * 快速保存想法——一键存入虚节点（思主干）
-   * @param {string} content - 想法完整内容
-   * @param {string[]} [implicit_tags=[]] - 隐性标签
-   * @returns {KnowledgeNode}
-   */
   addIdea(content, implicit_tags = []) {
     const id = 'idea_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     const node = new KnowledgeNode({
@@ -200,22 +164,6 @@ class KnowledgeTree {
     return node;
   }
 
-  /**
-   * AI 解析摄入——将 AI 解析层产出的节点数据写入树
-   *
-   * 【来源】白皮书 Phase 1（对话→JSON AI 解析层）的落库入口。
-   * 与 addNote/addIdea 的区别：支持完整字段（axis/state/summary/显隐标签），
-   * 由 AI 提炼而非自动截断。
-   *
-   * 【主权在人】AI 只是提议：
-   *   1. 节点写入后不自动挂到任何父节点（parent_hint 仅作提示，父节点不存在则悬空）
-   *   2. state 默认尊重 AI 判定（实=已验证经验 / 虚=待验证构想），用户确认时可见可改
-   *   3. 写入后自动触发跨干关联发现，让隐性标签发挥作用
-   *
-   * @param {Object} parsed - Schema 校验通过的节点数据（{axis,state,summary,explicit_tags,implicit_tags,parent_hint}）
-   * @param {string} rawSource - 原始输入文本（对话/笔记原文）
-   * @returns {KnowledgeNode}
-   */
   addFromAI(parsed, rawSource) {
     const id = 'ai_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     const node = new KnowledgeNode({
@@ -228,7 +176,6 @@ class KnowledgeTree {
       implicit_tags: parsed.implicit_tags || [],
     });
     this.addNode(node);
-    // parent_hint 若指向已存在节点，则挂载为其子节点（提议执行，结构权仍归用户确认）
     if (parsed.parent_hint && this.nodes.has(parsed.parent_hint)) {
       const parent = this.nodes.get(parsed.parent_hint);
       if (parent && parent.axis === parsed.axis) {
@@ -239,43 +186,11 @@ class KnowledgeTree {
     return node;
   }
 
-  /**
-   * 截断文本用于 summary
-   */
   _truncate(text, maxLen) {
     if (text.length <= maxLen) return text;
     return text.slice(0, maxLen) + '...';
   }
 
-  /**
-   * ASCII 渲染——干支叶真实层级，递归展示父→子→叶
-   *
-   * 【渲染算法】
-   *   1. 按三大主干（生/业/思）分组
-   *   2. 每个主干内构建 childrenMap（节点→同主干子节点列表）
-   *   3. 找出根节点（没有被任何节点作为子节点的），按热力降序排列
-   *   4. 递归渲染：父节点→子节点→叶节点，使用树形连接符（├── / └── / │）
-   *
-   * 【每行格式】
-   *   {前缀}{连接符}{状态} {层级}{标题} ·标签 🔥热力 ↔跨干数 📄长内容
-   *   - 状态：●=实叶，○=虚叶
-   *   - 层级：L2/L3...（仅 level>1 时显示）
-   *   - 标签：最多2个隐性标签，用·分隔，超出标+N
-   *   - 热力：最多3个🔥
-   *   - 跨干数：↔N 表示有N个跨干关联（不显示具体ID，保持简洁）
-   *   - 长内容：📄 表示 raw_source 超过100字，用 view 命令查看完整内容
-   *
-   * 【化土渲染】
-   *   heat_score < COMPOST_THRESHOLD(0.3) 的节点显示为灰色 + 🍂 标记，
-   *   不显示热力/标签/跨干（视觉折叠，数据留存）。子节点仍递归渲染并独立判断化土。
-   *
-   * 【设计原则】
-   *   - 大道至简：树上只显示摘要，完整内容用 view 查看
-   *   - 热力驱动：根节点按热力排序，高热度的知识优先呈现
-   *   - 跨干关联只显示数量：具体关联用 view 或 cross 命令查看
-   *
-   * @returns {string} 完整的 ASCII 树形文本
-   */
   renderASCII() {
     const lines = [];
     lines.push('═══════════════════════════════════════════════════');
@@ -292,7 +207,6 @@ class KnowledgeTree {
         continue;
       }
 
-      // 构建 children map
       const childrenMap = new Map();
       const allChildIds = new Set();
       for (const node of axisNodes) {
@@ -303,19 +217,16 @@ class KnowledgeTree {
         for (const c of children) allChildIds.add(c.node_id);
       }
 
-      // 根节点：没有被任何节点作为子节点的，按热力排序
       const roots = axisNodes
         .filter(n => !allChildIds.has(n.node_id))
         .sort((a, b) => b.heat_score - a.heat_score);
 
-      // 递归渲染
       const renderNode = (node, prefix, isLast) => {
         const connector = isLast ? '└── ' : '├── ';
         const stateMark = node.state === '实' ? '●' : '○';
         const levelMark = node.level > 1 ? `L${node.level} ` : '';
 
         if (node.isCompost()) {
-          // 落叶化土：灰色淡化 + 🍂标记，不显示热力/标签/跨干（视觉折叠，数据留存）
           lines.push(`${prefix}${connector}\x1b[90m${stateMark} ${levelMark}${node.summary} 🍂\x1b[0m`);
         } else {
           const heatBars = '🔥'.repeat(Math.min(3, Math.ceil(node.heat_score / 2)));
@@ -355,9 +266,6 @@ class KnowledgeTree {
     return Array.from(this.nodes.values()).filter(n => n.state === state).length;
   }
 
-  /**
-   * 全树自省快照——对齐 ODDM introspect 理念
-   */
   introspect() {
     return {
       total_nodes: this.nodes.size,
@@ -375,9 +283,6 @@ class KnowledgeTree {
     };
   }
 
-  /**
-   * 序列化——导出纯数据数组，用于持久化
-   */
   toJSON() {
     return Array.from(this.nodes.values()).map(n => ({
       node_id: n.node_id,
@@ -395,11 +300,6 @@ class KnowledgeTree {
     }));
   }
 
-  /**
-   * 反序列化——从数据数组重建树
-   * @param {Array} data - toJSON() 导出的数组
-   * @returns {KnowledgeTree}
-   */
   static fromJSON(data) {
     const tree = new KnowledgeTree();
     if (!Array.isArray(data)) return tree;
