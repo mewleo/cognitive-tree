@@ -243,3 +243,76 @@ test('DoubaoParser 默认使用 forceFetch（不依赖全局 fetch）', async ()
     server.close();
   }
 });
+
+// ─── 认知结晶 AI 化：summarizeForCrystallization ───
+
+test('结晶归纳：正常将子节点碎片归纳为高阶表述', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchOk('明确边界与所有权，系统自然有序无冲突'),
+  });
+  const children = [
+    { summary: 'Rust单播原则下无内存泄漏', axis: '业', state: '实' },
+    { summary: 'ODDM对象引用天然形成拓扑', axis: '业', state: '实' },
+    { summary: '家庭分工明确不越界', axis: '生', state: '实' },
+  ];
+  const result = await parser.summarizeForCrystallization(children);
+  assert.equal(result.ok, true);
+  assert.equal(result.summary, '明确边界与所有权，系统自然有序无冲突');
+});
+
+test('结晶归纳：空子节点数组返回错误', async () => {
+  const parser = new DoubaoParser({ apiKey: 'test-key', fetchImpl: mockFetchOk('x') });
+  const result = await parser.summarizeForCrystallization([]);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('至少需要'));
+});
+
+test('结晶归纳：AI返回空文本返回错误', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchOk('   '),
+  });
+  const children = [{ summary: '碎片A', axis: '业', state: '实' }];
+  const result = await parser.summarizeForCrystallization(children);
+  assert.equal(result.ok, false);
+  // _request 层会拦截空 content 抛错，或清洗后为空——两种都应返回错误
+  assert.ok(result.error && result.error.length > 0);
+});
+
+test('结晶归纳：HTTP错误返回清晰错误', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchError(500, 'server error'),
+  });
+  const children = [{ summary: '碎片A', axis: '业', state: '实' }];
+  const result = await parser.summarizeForCrystallization(children);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('HTTP 500'));
+});
+
+test('结晶归纳：请求体使用结晶提示词并包含子节点内容', async () => {
+  let capturedBody = null;
+  const fetchImpl = async (url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '归纳结果' } }] }),
+    };
+  };
+  const parser = new DoubaoParser({ apiKey: 'test-key', fetchImpl });
+  const children = [
+    { summary: '碎片A内容', axis: '业', state: '实', raw_source: '原始A' },
+    { summary: '碎片B内容', axis: '思', state: '虚' },
+  ];
+  await parser.summarizeForCrystallization(children);
+  assert.ok(capturedBody, '请求体应被捕获');
+  // system 消息应包含结晶提示词
+  const sysMsg = capturedBody.messages.find(m => m.role === 'system');
+  assert.ok(sysMsg.content.includes('认知结晶'), 'system prompt 应包含结晶归纳指令');
+  // user 消息应包含子节点摘要
+  const userMsg = capturedBody.messages.find(m => m.role === 'user');
+  assert.ok(userMsg.content.includes('碎片A内容'), 'user message 应包含子节点摘要');
+  assert.ok(userMsg.content.includes('碎片B内容'), 'user message 应包含所有子节点');
+  assert.ok(userMsg.content.includes('原始A'), 'user message 应包含 raw_source');
+});
