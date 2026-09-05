@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- **认知结晶 AI 化（智能行为层功能一）**：结晶提议从手动查看升级为 AI 自动生成高阶表述。
+  - `src/meta-prompt.js`：新增 `CRYSTALLIZATION_PROMPT`——认知结晶归纳系统提示词（指导 AI 将一组底层碎片降维为一条≤50字的第一性原理）。
+  - `DoubaoParser.summarizeForCrystallization(childrenNodes)`：单独调一次 AI（用户确认多调用没坏处，理解更透彻），基于子节点内容生成高阶表述，返回 `{ok, summary}`。
+  - `crystal` 命令升级：检测到可结晶节点后自动调用 AI 生成表述提议，交互为 `[y=用AI表述 / n=跳过 / m=手动输入]`；未配置 API Key 时降级为旧的手动模式。
+  - `parse` 后自动结晶提议：环境变量 `AUTO_CRYSTALLIZE_PROPOSE=1` 时，parse 写入后自动扫描结晶条件并提示（无缝但 parse 变长）；默认关闭，保持独立 crystal 命令。
+  - 测试新增 5 项（结晶归纳正常/空数组/空文本/HTTP错误/请求体校验），总数达 74 项全过。
 - **AI 解析层（白皮书 Phase 1 首步落地）**：`parse "内容"` 命令——调用豆包 Chat Completions API 将对话/笔记文本解析为 KnowledgeNode JSON，经 Schema 校验后展示给用户确认，确认后写入树。双通道摄入（用户手输 + AI 自动提炼）的 AI 通道打通。
   - `src/meta-prompt.js`：系统提示词（坐标锚定/虚实判定/隐性抽象规则 + 三条红线 + 两个 Few-Shot 对齐示例）。
   - `src/schema-validator.js`：KnowledgeNode JSON Schema 校验器（axis/state/summary/标签类型/红线3隐性标签不得含业务词/长度上限），零第三方依赖。

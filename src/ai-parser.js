@@ -18,7 +18,7 @@
 
 const http = require('http');
 const https = require('https');
-const { META_PROMPT } = require('./meta-prompt');
+const { META_PROMPT, CRYSTALLIZATION_PROMPT } = require('./meta-prompt');
 const { SchemaValidator } = require('./schema-validator');
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
@@ -90,7 +90,7 @@ class DoubaoParser {
     // 3. 构造并发送请求
     let responseText;
     try {
-      responseText = await this._request(text);
+      responseText = await this._request(META_PROMPT, text);
     } catch (e) {
       // 区分超时与其他网络错误，给出可操作的排查提示
       if (e.name === 'AbortError' || /abort/i.test(e.message)) {
@@ -122,11 +122,65 @@ class DoubaoParser {
   }
 
   /**
+   * 认知结晶归纳——将一组底层碎片降维为高阶第一性原理表述
+   *
+   * 【设计意图】
+   * 白皮书第4节"认知结晶"：当底层零散经验积累到一定程度，
+   * 单独调一次 AI（用户确认多调用没坏处，理解更透彻），
+   * 基于子节点内容生成高阶表述，供用户确认是否执行结晶。
+   *
+   * 【主权在人】
+   * 本方法只生成提议表述，不执行结晶。结晶操作由 KnowledgeTree.crystallize
+   * 在用户确认后执行。
+   *
+   * @param {Array<{summary: string, raw_source?: string, axis: string, state: string}>} childrenNodes
+   *   同一父节点下的子节点列表（至少1个，实际结晶条件≥3个）
+   * @returns {Promise<{ok: boolean, summary?: string, error?: string}>}
+   *   ok=true 时 summary 为 AI 生成的高阶表述（≤50字）
+   */
+  async summarizeForCrystallization(childrenNodes) {
+    // 1. 输入校验
+    if (!Array.isArray(childrenNodes) || childrenNodes.length === 0) {
+      return { ok: false, error: '结晶归纳至少需要1个子节点' };
+    }
+    // 2. Key 校验
+    const keyCheck = this.checkKey();
+    if (!keyCheck.ok) {
+      return { ok: false, error: keyCheck.error };
+    }
+    // 3. 格式化子节点内容为 user message
+    const userText = childrenNodes.map((n, i) => {
+      const src = n.raw_source ? `\n  原文: ${n.raw_source}` : '';
+      return `${i + 1}. [${n.axis}/${n.state}] ${n.summary}${src}`;
+    }).join('\n');
+    // 4. 发送请求（用结晶提示词，单独一次 AI 调用）
+    let responseText;
+    try {
+      responseText = await this._request(CRYSTALLIZATION_PROMPT, userText);
+    } catch (e) {
+      if (e.name === 'AbortError' || /abort/i.test(e.message)) {
+        return {
+          ok: false,
+          error: `结晶归纳 AI 请求超时（${REQUEST_TIMEOUT_MS / 1000}s）`,
+        };
+      }
+      return { ok: false, error: `结晶归纳 AI 调用失败: ${e.message}` };
+    }
+    // 5. 清洗结果（去掉可能的引号、空白、代码块）
+    const summary = extractJson(responseText) || responseText.trim().replace(/^["'「『]+|["'」』]+$/g, '').trim();
+    if (!summary || summary.length === 0) {
+      return { ok: false, error: '结晶归纳 AI 返回空文本' };
+    }
+    return { ok: true, summary };
+  }
+
+  /**
    * 发送 Chat Completions 请求（可被 mock 替换）
-   * @param {string} text
+   * @param {string} systemPrompt - 系统提示词
+   * @param {string} userText - 用户消息内容
    * @returns {Promise<string>} 模型回复的原始文本
    */
-  async _request(text) {
+  async _request(systemPrompt, userText) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -140,8 +194,8 @@ class DoubaoParser {
           model: this.model,
           temperature: 0.3, // 低温度，保证解析稳定性
           messages: [
-            { role: 'system', content: META_PROMPT },
-            { role: 'user', content: text },
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userText },
           ],
         }),
         signal: controller.signal,
