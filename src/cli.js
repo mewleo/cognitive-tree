@@ -247,7 +247,7 @@ DATA.forEach(n=>{
       const x2=p2.x+NODE_W/2,y2=p2.y;
       const my=(y1+y2)/2;
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+      path.setAttribute('d',\`M\${x1},\${y1} C\${x1},\${my} \${x2},\${my} \${x2},\${y2}\`);
       path.setAttribute('class','link');
       svg.appendChild(path);
     }
@@ -267,7 +267,7 @@ DATA.forEach(n=>{
       const x2=p2.x+NODE_W/2,y2=p2.y+NODE_H/2;
       const mx=(x1+x2)/2,my=(y1+y2)/2-40;
       const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',`M${x1},${y1} Q${mx},${my} ${x2},${y2}`);
+      path.setAttribute('d',\`M\${x1},\${y1} Q\${mx},\${my} \${x2},\${y2}\`);
       path.setAttribute('class','cross-link');
       svg.appendChild(path);
     }
@@ -321,16 +321,16 @@ Object.values(positions).forEach(({x,y,node})=>{
 const real=DATA.filter(n=>n.state==='实').length;
 const virt=DATA.filter(n=>n.state==='虚').length;
 const cross=DATA.filter(n=>(n.cross_links||[]).length>0).length;
-document.getElementById('stats').textContent=`节点 ${DATA.length} | 实 ${real} 虚 ${virt} | 跨干关联 ${cross}`;
+document.getElementById('stats').textContent=\`节点 \${DATA.length} | 实 \${real} 虚 \${virt} | 跨干关联 \${cross}\`;
 
 function showTooltip(e,node){
   tooltip.style.display='block';
-  tooltip.innerHTML=`<div class="t-title">${node.summary}</div>
-  <div class="t-row">主干: ${node.axis} | 状态: ${node.state} | 层级: L${node.level}</div>
-  <div class="t-row">热力: ${node.heat_score.toFixed(1)}</div>
-  ${node.implicit_tags&&node.implicit_tags.length?'<div class="t-row">隐性标签: '+node.implicit_tags.join(', ')+'</div>':''}
-  ${node.explicit_tags&&node.explicit_tags.length?'<div class="t-row">显性标签: '+node.explicit_tags.join(', ')+'</div>':''}
-  ${node.raw_source?'<div class="t-content">'+node.raw_source+'</div>':''}`;
+  tooltip.innerHTML=\`<div class="t-title">\${node.summary}</div>
+  <div class="t-row">主干: \${node.axis} | 状态: \${node.state} | 层级: L\${node.level}</div>
+  <div class="t-row">热力: \${node.heat_score.toFixed(1)}</div>
+  \${node.implicit_tags&&node.implicit_tags.length?'<div class="t-row">隐性标签: '+node.implicit_tags.join(', ')+'</div>':''}
+  \${node.explicit_tags&&node.explicit_tags.length?'<div class="t-row">显性标签: '+node.explicit_tags.join(', ')+'</div>':''}
+  \${node.raw_source?'<div class="t-content">'+node.raw_source+'</div>':''}\`;
   moveTooltip(e);
 }
 function moveTooltip(e){tooltip.style.left=(e.clientX+15)+'px';tooltip.style.top=(e.clientY+15)+'px';}
