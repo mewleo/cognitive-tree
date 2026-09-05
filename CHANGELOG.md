@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- **落叶化土（智能行为层功能二）**：热力低于阈值的节点自动视觉淡化（落叶化土），数据永久留存，touch 可唤醒。
+  - `KnowledgeNode.COMPOST_THRESHOLD = 0.3`：默认化土阈值（可通过 `isCompost(threshold)` 自定义）。
+  - `KnowledgeNode.isCompost(threshold)`：判断节点是否已化土（heat_score 严格低于阈值）。
+  - `renderASCII` 化土渲染：化土节点显示灰色（ANSI 90m）+ 🍂 标记，不显示热力🔥/标签/跨干（视觉折叠，子节点仍递归渲染并独立判断化土）。
+  - 设计原则：化土是纯视觉表现，不是新的节点状态（虚/实不变），对应白皮书"长期不用的知识自动褪色、折叠，但底层留存"。
+  - 测试新增 7 项（isCompost 6 + renderASCII 化土标记 1），总数达 81 项全过。
 - **认知结晶 AI 化（智能行为层功能一）**：结晶提议从手动查看升级为 AI 自动生成高阶表述。
   - `src/meta-prompt.js`：新增 `CRYSTALLIZATION_PROMPT`——认知结晶归纳系统提示词（指导 AI 将一组底层碎片降维为一条≤50字的第一性原理）。
   - `DoubaoParser.summarizeForCrystallization(childrenNodes)`：单独调一次 AI（用户确认多调用没坏处，理解更透彻），基于子节点内容生成高阶表述，返回 `{ok, summary}`。

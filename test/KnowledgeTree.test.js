@@ -180,6 +180,17 @@ describe('KnowledgeTree', () => {
       const childLine = output.split('\n').find(l => l.includes('子节点1'));
       assert.ok(childLine.includes('└') || childLine.includes('├') || childLine.includes('│'));
     });
+
+    it('化土节点应显示🍂标记', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'hot1', axis: '业', state: '实', summary: '高热力节点', heat_score: 2.0 }));
+      tree.addNode(new KnowledgeNode({ node_id: 'cold1', axis: '业', state: '实', summary: '化土节点', heat_score: 0.1 }));
+
+      const output = tree.renderASCII();
+      const coldLine = output.split('\n').find(l => l.includes('化土节点'));
+      assert.ok(coldLine.includes('🍂'), '化土节点应显示🍂标记');
+      const hotLine = output.split('\n').find(l => l.includes('高热力节点'));
+      assert.ok(!hotLine.includes('🍂'), '高热力节点不应显示🍂标记');
+    });
   });
 
   describe('AI 解析摄入 addFromAI', () => {

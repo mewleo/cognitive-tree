@@ -13,7 +13,7 @@
  *      —— 系统只提议，人做决定（主权在人）
  *   4. 跨干启发：discoverCrossLinks（基于隐性标签自动发现跨主干关联）
  *   5. 快速通道：addNote（实节点/笔记）/ addIdea（虚节点/想法）
- *   6. 渲染输出：renderASCII（CLI 树形视图）
+ *   6. 渲染输出：renderASCII（CLI 树形视图，化土节点灰色🍂淡化）
  *   7. 自省快照：introspect（对齐 ODDM introspect 理念，AI 操作入口）
  *   8. 持久化：toJSON / fromJSON（序列化/反序列化，当前为 JSON 文件，后续接入 ODDM）
  *
@@ -265,6 +265,10 @@ class KnowledgeTree {
    *   - 跨干数：↔N 表示有N个跨干关联（不显示具体ID，保持简洁）
    *   - 长内容：📄 表示 raw_source 超过100字，用 view 命令查看完整内容
    *
+   * 【化土渲染】
+   *   heat_score < COMPOST_THRESHOLD(0.3) 的节点显示为灰色 + 🍂 标记，
+   *   不显示热力/标签/跨干（视觉折叠，数据留存）。子节点仍递归渲染并独立判断化土。
+   *
    * 【设计原则】
    *   - 大道至简：树上只显示摘要，完整内容用 view 查看
    *   - 热力驱动：根节点按热力排序，高热度的知识优先呈现
@@ -309,14 +313,20 @@ class KnowledgeTree {
         const connector = isLast ? '└── ' : '├── ';
         const stateMark = node.state === '实' ? '●' : '○';
         const levelMark = node.level > 1 ? `L${node.level} ` : '';
-        const heatBars = '🔥'.repeat(Math.min(3, Math.ceil(node.heat_score / 2)));
-        const tagCount = node.implicit_tags.length;
-        const implicit = tagCount > 0
-          ? ` ·${node.implicit_tags.slice(0, 2).join('·')}${tagCount > 2 ? '+' + (tagCount - 2) : ''}`
-          : '';
-        const cross = node.cross_links.length > 0 ? ` ↔${node.cross_links.length}` : '';
-        const longContent = node.raw_source && node.raw_source.length > 100 ? ' 📄' : '';
-        lines.push(`${prefix}${connector}${stateMark} ${levelMark}${node.summary}${implicit} ${heatBars}${cross}${longContent}`);
+
+        if (node.isCompost()) {
+          // 落叶化土：灰色淡化 + 🍂标记，不显示热力/标签/跨干（视觉折叠，数据留存）
+          lines.push(`${prefix}${connector}\x1b[90m${stateMark} ${levelMark}${node.summary} 🍂\x1b[0m`);
+        } else {
+          const heatBars = '🔥'.repeat(Math.min(3, Math.ceil(node.heat_score / 2)));
+          const tagCount = node.implicit_tags.length;
+          const implicit = tagCount > 0
+            ? ` ·${node.implicit_tags.slice(0, 2).join('·')}${tagCount > 2 ? '+' + (tagCount - 2) : ''}`
+            : '';
+          const cross = node.cross_links.length > 0 ? ` ↔${node.cross_links.length}` : '';
+          const longContent = node.raw_source && node.raw_source.length > 100 ? ' 📄' : '';
+          lines.push(`${prefix}${connector}${stateMark} ${levelMark}${node.summary}${implicit} ${heatBars}${cross}${longContent}`);
+        }
 
         const children = childrenMap.get(node.node_id) || [];
         if (children.length > 0) {

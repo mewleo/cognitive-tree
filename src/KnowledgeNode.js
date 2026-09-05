@@ -21,6 +21,7 @@
  *   - decay()    自然衰减，热力下降（对应时间流逝）
  *   - promoteToSolid()  虚转实（构想被实践验证，必须显式调用，主权在人）
  *   - canCrystallize()  判断是否达到结晶条件（底层碎片积累足够支撑）
+ *   - isCompost()       判断是否已落叶化土（热力低于阈值，视觉淡化）
  *
  * @example
  * const node = new KnowledgeNode({
@@ -46,6 +47,8 @@ class KnowledgeNode {
   static HEAT_TOUCH_STEP = 0.3;
   /** 每次 decay() 热力衰减步长 */
   static HEAT_DECAY_STEP = 0.1;
+  /** 落叶化土阈值：heat_score 低于此值视为化土（视觉淡化，数据留存） */
+  static COMPOST_THRESHOLD = 0.3;
 
   /**
    * @param {Object} opts
@@ -69,6 +72,7 @@ class KnowledgeNode {
     if (!KnowledgeNode.VALID_STATES.includes(opts.state)) {
       throw new Error(`state 必须为虚/实，收到: ${opts.state}`);
     }
+
     this.node_id = opts.node_id;
     this.axis = opts.axis;
     this.state = opts.state;
@@ -86,7 +90,6 @@ class KnowledgeNode {
   /**
    * 被注意到——热力上升
    * 对应人的注意力投射到这个知识点上
-   * @returns {number} 更新后的热力值
    */
   touch() {
     this.heat_score = Math.min(
@@ -99,7 +102,6 @@ class KnowledgeNode {
   /**
    * 自然衰减——热力下降
    * 对应时间流逝，不再被关注的知识慢慢褪色
-   * @returns {number} 更新后的热力值
    */
   decay() {
     this.heat_score = Math.max(0, this.heat_score - KnowledgeNode.HEAT_DECAY_STEP);
@@ -109,7 +111,6 @@ class KnowledgeNode {
   /**
    * 虚转实——构想被实践验证
    * 必须显式调用，系统不会自动转换（主权在人）
-   * @returns {string} 更新后的状态
    */
   promoteToSolid() {
     if (this.state === '虚') {
@@ -122,8 +123,6 @@ class KnowledgeNode {
   /**
    * 添加跨干关联（自动去重）
    * 基于隐性标签触发的跨主干启发
-   * @param {string} target_node_id - 目标节点ID
-   * @returns {string[]} 更新后的跨干关联列表
    */
   addCrossLink(target_node_id) {
     if (!this.cross_links.includes(target_node_id)) {
@@ -143,9 +142,22 @@ class KnowledgeNode {
   }
 
   /**
+   * 判断是否已落叶化土
+   *
+   * 【设计意图】
+   * 白皮书第4节"热力驱动"：长期不用的知识自动褪色、折叠（落叶化土），但底层留存。
+   * 化土是纯视觉表现，不是新的节点状态（虚/实不变），数据永久留存。
+   * 化土节点被 touch（注意力重新投射）后热力回升，可唤醒。
+   *
+   * @param {number} [threshold] - 化土阈值，默认 COMPOST_THRESHOLD(0.3)
+   * @returns {boolean} heat_score 严格低于阈值时返回 true
+   */
+  isCompost(threshold = KnowledgeNode.COMPOST_THRESHOLD) {
+    return this.heat_score < threshold;
+  }
+
+  /**
    * 序列化——对齐 ODDM 对象契约
-   * 输出嵌套结构（content/tags/metrics/topology），与 Meta-Blueprint 规范一致
-   * @returns {Object}
    */
   toJSON() {
     return {
