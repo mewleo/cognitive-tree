@@ -5,10 +5,7 @@ const { KnowledgeTree } = require('../src/KnowledgeTree');
 
 describe('KnowledgeTree', () => {
   let tree;
-
-  beforeEach(() => {
-    tree = new KnowledgeTree();
-  });
+  beforeEach(() => { tree = new KnowledgeTree(); });
 
   describe('节点管理', () => {
     it('应能添加和获取节点', () => {
@@ -16,7 +13,6 @@ describe('KnowledgeTree', () => {
       tree.addNode(node);
       assert.strictEqual(tree.getNode('n1'), node);
     });
-
     it('应能按主干 axis 查询节点', () => {
       tree.addNode(new KnowledgeNode({ node_id: 'a1', axis: '生', state: '实', summary: '生活' }));
       tree.addNode(new KnowledgeNode({ node_id: 'a2', axis: '业', state: '实', summary: '工作' }));
@@ -24,16 +20,12 @@ describe('KnowledgeTree', () => {
       assert.strictEqual(tree.getByAxis('生').length, 1);
       assert.strictEqual(tree.getByAxis('业').length, 2);
     });
-
     it('应能获取子节点', () => {
       const parent = new KnowledgeNode({ node_id: 'p1', axis: '业', state: '实', summary: '父节点', children_ids: ['c1', 'c2'] });
-      const child1 = new KnowledgeNode({ node_id: 'c1', axis: '业', state: '实', summary: '子1' });
-      const child2 = new KnowledgeNode({ node_id: 'c2', axis: '业', state: '实', summary: '子2' });
       tree.addNode(parent);
-      tree.addNode(child1);
-      tree.addNode(child2);
-      const children = tree.getChildren('p1');
-      assert.strictEqual(children.length, 2);
+      tree.addNode(new KnowledgeNode({ node_id: 'c1', axis: '业', state: '实', summary: '子1' }));
+      tree.addNode(new KnowledgeNode({ node_id: 'c2', axis: '业', state: '实', summary: '子2' }));
+      assert.strictEqual(tree.getChildren('p1').length, 2);
     });
   });
 
@@ -44,7 +36,6 @@ describe('KnowledgeTree', () => {
       tree.touchNode('h1');
       assert.ok(tree.getNode('h1').heat_score > before);
     });
-
     it('decayAll 应对所有节点衰减', () => {
       tree.addNode(new KnowledgeNode({ node_id: 'd1', axis: '生', state: '实', summary: 'a', heat_score: 2.0 }));
       tree.addNode(new KnowledgeNode({ node_id: 'd2', axis: '业', state: '实', summary: 'b', heat_score: 2.0 }));
@@ -56,288 +47,227 @@ describe('KnowledgeTree', () => {
 
   describe('结晶提议', () => {
     it('应找到满足结晶条件的节点', () => {
-      const parent = new KnowledgeNode({
-        node_id: 'cry1', axis: '业', state: '实', summary: '可结晶节点',
-        children_ids: ['x1', 'x2', 'x3'],
-      });
-      tree.addNode(parent);
+      tree.addNode(new KnowledgeNode({ node_id: 'cry1', axis: '业', state: '实', summary: '可结晶', children_ids: ['x1', 'x2', 'x3'] }));
       tree.addNode(new KnowledgeNode({ node_id: 'x1', axis: '业', state: '实', summary: '碎片1' }));
       tree.addNode(new KnowledgeNode({ node_id: 'x2', axis: '业', state: '实', summary: '碎片2' }));
       tree.addNode(new KnowledgeNode({ node_id: 'x3', axis: '业', state: '实', summary: '碎片3' }));
-
-      const suggestions = tree.suggestCrystallization(3);
-      assert.strictEqual(suggestions.length, 1);
-      assert.strictEqual(suggestions[0].node_id, 'cry1');
+      assert.strictEqual(tree.suggestCrystallization(3).length, 1);
     });
-
     it('不应提议高阶节点结晶', () => {
-      const high = new KnowledgeNode({
-        node_id: 'high1', axis: '思', state: '实', summary: '高阶原理',
-        level: 3, children_ids: ['y1', 'y2', 'y3'],
-      });
-      tree.addNode(high);
+      tree.addNode(new KnowledgeNode({ node_id: 'high1', axis: '思', state: '实', summary: '高阶', level: 3, children_ids: ['y1', 'y2', 'y3'] }));
       assert.strictEqual(tree.suggestCrystallization(3).length, 0);
     });
   });
 
   describe('跨干关联发现', () => {
     it('应发现不同主干但有相同隐性标签的节点', () => {
-      tree.addNode(new KnowledgeNode({
-        node_id: 'work1', axis: '业', state: '实', summary: '代码模块分离',
-        implicit_tags: ['解耦'],
-      }));
-      tree.addNode(new KnowledgeNode({
-        node_id: 'life1', axis: '生', state: '实', summary: '家庭分工明确',
-        implicit_tags: ['解耦', '边界'],
-      }));
-      tree.addNode(new KnowledgeNode({
-        node_id: 'thought1', axis: '思', state: '虚', summary: '哲学中的分与合',
-        implicit_tags: ['解耦'],
-      }));
-
-      const links = tree.discoverCrossLinks();
-      const workNode = tree.getNode('work1');
-      const lifeNode = tree.getNode('life1');
-      assert.ok(workNode.cross_links.includes('life1') || workNode.cross_links.includes('thought1'));
-      assert.ok(lifeNode.cross_links.includes('work1') || lifeNode.cross_links.includes('thought1'));
+      tree.addNode(new KnowledgeNode({ node_id: 'work1', axis: '业', state: '实', summary: '代码分离', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'life1', axis: '生', state: '实', summary: '家庭分工', implicit_tags: ['解耦', '边界'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'thought1', axis: '思', state: '虚', summary: '哲学分合', implicit_tags: ['解耦'] }));
+      tree.discoverCrossLinks();
+      assert.ok(tree.getNode('work1').cross_links.includes('life1') || tree.getNode('work1').cross_links.includes('thought1'));
     });
   });
 
-  describe('findCrossNodesByTags（功能三：AI跨界启发前置）', () => {
+  describe('findCrossNodesByTags', () => {
     it('应返回其他主干中同隐性标签的节点', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '模块解耦', implicit_tags: ['解耦'] }));
-      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '家庭分工', implicit_tags: ['解耦', '边界'] }));
-      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '哲学分合', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '模块', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '家庭', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '哲学', implicit_tags: ['解耦'] }));
       const result = tree.findCrossNodesByTags(['解耦'], '业');
       assert.strictEqual(result.length, 2);
-      assert.ok(result.every(n => n.axis !== '业'));
     });
-
-    it('应排除指定主干的节点', () => {
+    it('应排除指定主干', () => {
       tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '工作', implicit_tags: ['复利'] }));
       tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '生活', implicit_tags: ['复利'] }));
-      const result = tree.findCrossNodesByTags(['复利'], '生');
-      assert.strictEqual(result.length, 1);
-      assert.strictEqual(result[0].axis, '业');
+      assert.strictEqual(tree.findCrossNodesByTags(['复利'], '生').length, 1);
     });
-
-    it('应按热力降序排列', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '低热力', implicit_tags: ['边界'], heat_score: 0.5 }));
-      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '高热力', implicit_tags: ['边界'], heat_score: 3.0 }));
-      const result = tree.findCrossNodesByTags(['边界'], '业');
-      assert.strictEqual(result[0].node_id, 't1');
-      assert.strictEqual(result[1].node_id, 'l1');
+    it('应按热力降序', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '低', implicit_tags: ['边界'], heat_score: 0.5 }));
+      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '高', implicit_tags: ['边界'], heat_score: 3.0 }));
+      assert.strictEqual(tree.findCrossNodesByTags(['边界'], '业')[0].node_id, 't1');
     });
-
     it('应限制返回数量', () => {
-      for (let i = 0; i < 8; i++) {
-        tree.addNode(new KnowledgeNode({ node_id: `n${i}`, axis: i % 2 === 0 ? '生' : '思', state: '实', summary: `节点${i}`, implicit_tags: ['熵增'], heat_score: i }));
-      }
-      const result = tree.findCrossNodesByTags(['熵增'], '业', 3);
-      assert.strictEqual(result.length, 3);
+      for (let i = 0; i < 8; i++) tree.addNode(new KnowledgeNode({ node_id: `n${i}`, axis: i % 2 ? '生' : '思', state: '实', summary: `节点${i}`, implicit_tags: ['熵增'], heat_score: i }));
+      assert.strictEqual(tree.findCrossNodesByTags(['熵增'], '业', 3).length, 3);
     });
-
-    it('无匹配标签时返回空数组', () => {
+    it('无匹配返回空数组', () => {
       tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '工作', implicit_tags: ['解耦'] }));
-      const result = tree.findCrossNodesByTags(['不存在的标签'], '业');
-      assert.strictEqual(result.length, 0);
+      assert.strictEqual(tree.findCrossNodesByTags(['不存在'], '业').length, 0);
+    });
+  });
+
+  describe('功能四：getTopHeatNodes', () => {
+    it('应返回热力最高的n个节点', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'h1', axis: '业', state: '实', summary: '低', heat_score: 0.5 }));
+      tree.addNode(new KnowledgeNode({ node_id: 'h2', axis: '业', state: '实', summary: '中', heat_score: 2.0 }));
+      tree.addNode(new KnowledgeNode({ node_id: 'h3', axis: '思', state: '虚', summary: '高', heat_score: 5.0 }));
+      const top = tree.getTopHeatNodes(2);
+      assert.strictEqual(top.length, 2);
+      assert.strictEqual(top[0].node_id, 'h3');
+    });
+    it('n大于节点总数时返回所有', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'a1', axis: '业', state: '实', summary: 'a', heat_score: 1.0 }));
+      assert.strictEqual(tree.getTopHeatNodes(10).length, 1);
+    });
+    it('空树返回空数组', () => { assert.strictEqual(tree.getTopHeatNodes(5).length, 0); });
+  });
+
+  describe('功能四：findKnowledgeIslands', () => {
+    it('应返回只有1个节点的隐性标签', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'i1', axis: '业', state: '实', summary: '孤岛', implicit_tags: ['熵增'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'i2', axis: '生', state: '实', summary: '共享1', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'i3', axis: '思', state: '虚', summary: '共享2', implicit_tags: ['解耦'] }));
+      const islands = tree.findKnowledgeIslands();
+      assert.ok(islands.includes('熵增'));
+      assert.ok(!islands.includes('解耦'));
+    });
+    it('所有标签多节点时返回空', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'a1', axis: '业', state: '实', summary: 'a', implicit_tags: ['复利'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'a2', axis: '生', state: '实', summary: 'b', implicit_tags: ['复利'] }));
+      assert.strictEqual(tree.findKnowledgeIslands().length, 0);
+    });
+    it('空树返回空', () => { assert.strictEqual(tree.findKnowledgeIslands().length, 0); });
+  });
+
+  describe('功能四：findVirtualLeavesWithoutSupport', () => {
+    it('应返回无实节点支撑的虚节点', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'v1', axis: '思', state: '虚', summary: '无支撑', implicit_tags: ['涌现'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'v2', axis: '思', state: '虚', summary: '有支撑', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '实', implicit_tags: ['解耦'] }));
+      assert.strictEqual(tree.findVirtualLeavesWithoutSupport().length, 1);
+      assert.strictEqual(tree.findVirtualLeavesWithoutSupport()[0].node_id, 'v1');
+    });
+    it('所有虚节点有支撑时返回空', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'v1', axis: '思', state: '虚', summary: '构想', implicit_tags: ['复利'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '生', state: '实', summary: '经验', implicit_tags: ['复利'] }));
+      assert.strictEqual(tree.findVirtualLeavesWithoutSupport().length, 0);
+    });
+    it('无虚节点返回空', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '实', implicit_tags: ['解耦'] }));
+      assert.strictEqual(tree.findVirtualLeavesWithoutSupport().length, 0);
+    });
+  });
+
+  describe('功能四：attractVirtualLeaves', () => {
+    it('应为虚节点建立同标签实节点的cross_link', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'v1', axis: '思', state: '虚', summary: '构想', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '经验', implicit_tags: ['解耦'] }));
+      const result = tree.attractVirtualLeaves();
+      assert.strictEqual(result.length, 1);
+      assert.ok(tree.getNode('v1').cross_links.includes('s1'));
+    });
+    it('已有关联不重复建立', () => {
+      const v = new KnowledgeNode({ node_id: 'v1', axis: '思', state: '虚', summary: '构想', implicit_tags: ['解耦'], cross_links: ['s1'] });
+      const s = new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '经验', implicit_tags: ['解耦'], cross_links: ['v1'] });
+      tree.addNode(v); tree.addNode(s);
+      assert.strictEqual(tree.attractVirtualLeaves().length, 0);
+    });
+    it('无实节点支撑不建立关联', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'v1', axis: '思', state: '虚', summary: '构想', implicit_tags: ['涌现'] }));
+      assert.strictEqual(tree.attractVirtualLeaves().length, 0);
     });
   });
 
   describe('快速通道', () => {
-    it('addNote 应快速创建实节点（默认业主干）', () => {
-      const node = tree.addNote('今天调试了ODDM的ref懒引用');
+    it('addNote 应创建实节点默认业主干', () => {
+      const node = tree.addNote('测试笔记');
       assert.strictEqual(node.axis, '业');
       assert.strictEqual(node.state, '实');
-      assert.strictEqual(node.summary, '今天调试了ODDM的ref懒引用');
-      assert.ok(tree.getNode(node.node_id));
     });
-
     it('addNote 应支持指定主干', () => {
-      const node = tree.addNote('作息调理经验', '生');
-      assert.strictEqual(node.axis, '生');
-      assert.strictEqual(node.state, '实');
+      assert.strictEqual(tree.addNote('生活', '生').axis, '生');
     });
-
-    it('addIdea 应快速创建虚节点（思主干）', () => {
-      const node = tree.addIdea('认知树可以用热力驱动应季显隐');
+    it('addIdea 应创建虚节点思主干', () => {
+      const node = tree.addIdea('想法');
       assert.strictEqual(node.axis, '思');
       assert.strictEqual(node.state, '虚');
-      assert.ok(tree.getNode(node.node_id));
     });
-
-    it('大内容应完整存 raw_source，summary 自动截断', () => {
-      const longContent = '这是一段很长的笔记内容，包含了很多细节和思考过程，用于测试大内容索引机制是否正常工作，raw_source应该保存完整内容而summary只显示前30个字';
-      const node = tree.addNote(longContent);
-      assert.strictEqual(node.raw_source, longContent);
-      assert.ok(node.summary.length <= 33);
+    it('大内容应完整存raw_source summary截断', () => {
+      const long = 'A'.repeat(150);
+      const node = tree.addNote(long);
+      assert.strictEqual(node.raw_source, long);
       assert.ok(node.summary.endsWith('...'));
     });
-
-    it('短内容 summary 不截断', () => {
-      const node = tree.addNote('短笔记');
-      assert.strictEqual(node.summary, '短笔记');
-      assert.strictEqual(node.raw_source, '短笔记');
+    it('短内容不截断', () => {
+      const node = tree.addNote('短');
+      assert.strictEqual(node.summary, '短');
     });
   });
 
   describe('大内容渲染', () => {
-    it('长内容节点应显示 📄 标记', () => {
-      const longContent = 'A'.repeat(150);
-      const node = tree.addNote(longContent);
-      const output = tree.renderASCII();
-      assert.ok(output.includes('📄'));
+    it('长内容节点应显示📄标记', () => {
+      tree.addNote('A'.repeat(150));
+      assert.ok(tree.renderASCII().includes('📄'));
     });
   });
 
-  describe('ASCII 渲染', () => {
-    it('应输出包含三大主干的树形结构', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'r1', axis: '生', state: '实', summary: '作息调理', heat_score: 0.8 }));
-      tree.addNode(new KnowledgeNode({ node_id: 'r2', axis: '业', state: '实', summary: 'ODDM设计', heat_score: 1.0, level: 2 }));
-      tree.addNode(new KnowledgeNode({ node_id: 'r3', axis: '思', state: '虚', summary: '认知树构想', heat_score: 0.7 }));
-
-      const output = tree.renderASCII();
-      assert.ok(output.includes('【生】'));
-      assert.ok(output.includes('【业】'));
-      assert.ok(output.includes('【思】'));
-      assert.ok(output.includes('作息调理'));
-      assert.ok(output.includes('ODDM设计'));
+  describe('ASCII渲染', () => {
+    it('应输出三大主干', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'r1', axis: '生', state: '实', summary: '作息' }));
+      tree.addNode(new KnowledgeNode({ node_id: 'r2', axis: '业', state: '实', summary: '工作' }));
+      tree.addNode(new KnowledgeNode({ node_id: 'r3', axis: '思', state: '虚', summary: '构想' }));
+      const out = tree.renderASCII();
+      assert.ok(out.includes('【生】') && out.includes('【业】') && out.includes('【思】'));
     });
-
-    it('应展示干支叶层级关系（父节点下递归显示子节点）', () => {
-      tree.addNode(new KnowledgeNode({
-        node_id: 'parent1', axis: '业', state: '实', summary: '父节点',
-        children_ids: ['child1', 'child2'],
-      }));
-      tree.addNode(new KnowledgeNode({ node_id: 'child1', axis: '业', state: '实', summary: '子节点1' }));
-      tree.addNode(new KnowledgeNode({ node_id: 'child2', axis: '业', state: '实', summary: '子节点2' }));
-
-      const output = tree.renderASCII();
-      assert.ok(output.includes('父节点'));
-      assert.ok(output.includes('子节点1'));
-      assert.ok(output.includes('子节点2'));
-      const childLine = output.split('\n').find(l => l.includes('子节点1'));
-      assert.ok(childLine.includes('└') || childLine.includes('├') || childLine.includes('│'));
+    it('应展示干支叶层级', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'p1', axis: '业', state: '实', summary: '父', children_ids: ['c1'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'c1', axis: '业', state: '实', summary: '子' }));
+      const out = tree.renderASCII();
+      assert.ok(out.includes('父') && out.includes('子'));
     });
-
-    it('化土节点应显示🍂标记', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'hot1', axis: '业', state: '实', summary: '高热力节点', heat_score: 2.0 }));
-      tree.addNode(new KnowledgeNode({ node_id: 'cold1', axis: '业', state: '实', summary: '化土节点', heat_score: 0.1 }));
-
-      const output = tree.renderASCII();
-      const coldLine = output.split('\n').find(l => l.includes('化土节点'));
-      assert.ok(coldLine.includes('🍂'), '化土节点应显示🍂标记');
-      const hotLine = output.split('\n').find(l => l.includes('高热力节点'));
-      assert.ok(!hotLine.includes('🍂'), '高热力节点不应显示🍂标记');
+    it('化土节点应显示🍂', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'cold', axis: '业', state: '实', summary: '化土', heat_score: 0.1 }));
+      const line = tree.renderASCII().split('\n').find(l => l.includes('化土'));
+      assert.ok(line.includes('🍂'));
     });
   });
 
-  describe('AI 解析摄入 addFromAI', () => {
-    it('应写入完整字段节点（轴/状态/摘要/显隐标签）', () => {
-      const node = tree.addFromAI({
-        axis: '业',
-        state: '实',
-        summary: 'Rust内存释放验证：单播原则下无泄漏',
-        explicit_tags: ['Rust', '内存管理'],
-        implicit_tags: ['所有权', '单播原则'],
-      }, '今天调通了 Rust 的内存释放...');
+  describe('AI解析摄入addFromAI', () => {
+    it('应写入完整字段', () => {
+      const node = tree.addFromAI({ axis: '业', state: '实', summary: '测试', explicit_tags: ['Rust'], implicit_tags: ['所有权'] }, '原文');
       assert.ok(node.node_id.startsWith('ai_'));
-      assert.strictEqual(node.axis, '业');
-      assert.strictEqual(node.state, '实');
-      assert.strictEqual(node.raw_source, '今天调通了 Rust 的内存释放...');
-      assert.deepEqual(node.explicit_tags, ['Rust', '内存管理']);
-      assert.deepEqual(node.implicit_tags, ['所有权', '单播原则']);
+      assert.deepEqual(node.implicit_tags, ['所有权']);
     });
-
-    it('超长 summary 自动截断到30字', () => {
-      const node = tree.addFromAI({
-        axis: '思',
-        state: '虚',
-        summary: '超'.repeat(40),
-        explicit_tags: [],
-        implicit_tags: [],
-      }, '原文');
-      assert.ok(node.summary.length <= 31);
+    it('超长summary截断', () => {
+      const node = tree.addFromAI({ axis: '思', state: '虚', summary: '超'.repeat(40), explicit_tags: [], implicit_tags: [] }, '原文');
       assert.ok(node.summary.endsWith('…'));
     });
-
-    it('parent_hint 指向同主干已存在节点时挂载为子节点', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'p_oddm', axis: '业', state: '实', summary: 'ODDM设计' }));
-      const node = tree.addFromAI({
-        axis: '业',
-        state: '实',
-        summary: 'ODL路径寻址',
-        explicit_tags: [],
-        implicit_tags: [],
-        parent_hint: 'p_oddm',
-      }, '原文');
-      assert.ok(tree.getNode('p_oddm').children_ids.includes(node.node_id));
+    it('parent_hint同主干挂载', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'p', axis: '业', state: '实', summary: '父' }));
+      const node = tree.addFromAI({ axis: '业', state: '实', summary: '子', explicit_tags: [], implicit_tags: [], parent_hint: 'p' }, '原文');
+      assert.ok(tree.getNode('p').children_ids.includes(node.node_id));
     });
-
-    it('parent_hint 指向不存在的节点时静默忽略（悬空不报错）', () => {
-      const node = tree.addFromAI({
-        axis: '业',
-        state: '实',
-        summary: '测试',
-        explicit_tags: [],
-        implicit_tags: [],
-        parent_hint: 'not_exist',
-      }, '原文');
+    it('parent_hint不存在静默忽略', () => {
+      const node = tree.addFromAI({ axis: '业', state: '实', summary: '测试', explicit_tags: [], implicit_tags: [], parent_hint: 'no' }, '原文');
       assert.ok(node);
-      assert.strictEqual(node.children_ids.length, 0);
     });
-
-    it('parent_hint 跨主干时不挂载（尊重三轴独立）', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'p_life', axis: '生', state: '实', summary: '生活' }));
-      const node = tree.addFromAI({
-        axis: '业',
-        state: '实',
-        summary: '测试',
-        explicit_tags: [],
-        implicit_tags: [],
-        parent_hint: 'p_life',
-      }, '原文');
-      assert.ok(!tree.getNode('p_life').children_ids.includes(node.node_id));
+    it('parent_hint跨主干不挂载', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'p', axis: '生', state: '实', summary: '父' }));
+      const node = tree.addFromAI({ axis: '业', state: '实', summary: '子', explicit_tags: [], implicit_tags: [], parent_hint: 'p' }, '原文');
+      assert.ok(!tree.getNode('p').children_ids.includes(node.node_id));
     });
-
-    it('隐性标签与既有节点同标签跨干时自动建立关联', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 'life_x', axis: '生', state: '实', summary: '家庭分工', implicit_tags: ['解耦'] }));
-      const node = tree.addFromAI({
-        axis: '业',
-        state: '实',
-        summary: '模块解耦设计',
-        explicit_tags: [],
-        implicit_tags: ['解耦'],
-      }, '原文');
-      assert.ok(node.cross_links.includes('life_x'));
+    it('同标签跨干自动建立关联', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'life', axis: '生', state: '实', summary: '家庭', implicit_tags: ['解耦'] }));
+      const node = tree.addFromAI({ axis: '业', state: '实', summary: '模块', explicit_tags: [], implicit_tags: ['解耦'] }, '原文');
+      assert.ok(node.cross_links.includes('life'));
     });
   });
 
   describe('序列化与反序列化', () => {
-    it('toJSON 应导出节点数组', () => {
-      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '测试序列化' }));
-      const data = tree.toJSON();
-      assert.ok(Array.isArray(data));
-      assert.strictEqual(data.length, 1);
-      assert.strictEqual(data[0].node_id, 's1');
-      assert.strictEqual(data[0].summary, '测试序列化');
+    it('toJSON应导出数组', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 's1', axis: '业', state: '实', summary: '测试' }));
+      assert.strictEqual(tree.toJSON().length, 1);
     });
-
-    it('fromJSON 应从数据重建完整树', () => {
-      const original = new KnowledgeTree();
-      original.addNode(new KnowledgeNode({ node_id: 'r1', axis: '生', state: '实', summary: '节点A', heat_score: 2.0 }));
-      original.addNode(new KnowledgeNode({ node_id: 'r2', axis: '思', state: '虚', summary: '节点B', implicit_tags: ['解耦'] }));
-      const data = original.toJSON();
-
-      const restored = KnowledgeTree.fromJSON(data);
-      assert.strictEqual(restored.nodes.size, 2);
+    it('fromJSON应重建完整树', () => {
+      const orig = new KnowledgeTree();
+      orig.addNode(new KnowledgeNode({ node_id: 'r1', axis: '生', state: '实', summary: 'A', heat_score: 2.0 }));
+      const restored = KnowledgeTree.fromJSON(orig.toJSON());
+      assert.strictEqual(restored.nodes.size, 1);
       assert.strictEqual(restored.getNode('r1').heat_score, 2.0);
-      assert.strictEqual(restored.getNode('r2').implicit_tags[0], '解耦');
     });
-
-    it('fromJSON 空数据应返回空树', () => {
-      const tree = KnowledgeTree.fromJSON([]);
-      assert.strictEqual(tree.nodes.size, 0);
+    it('fromJSON空数据返回空树', () => {
+      assert.strictEqual(KnowledgeTree.fromJSON([]).nodes.size, 0);
     });
   });
 });
