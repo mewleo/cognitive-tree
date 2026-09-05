@@ -4,7 +4,7 @@
 
 ## 系统概述
 
-认知树是一棵有生命的个人知识生态系统，不是静态笔记仓库。通过 CLI 命令交互，所有操作即时生效、JSON 文件持久化。
+认知树是一棵有生命的个人知识生态系统，不是静态笔记仓库。通过 CLI 命令交互，所有操作即时生效、内存存储。
 
 **启动方式：** 在项目根目录执行 `node src/cli.js`，进入交互式命令行。
 
@@ -47,12 +47,27 @@ cross                 重新发现跨干关联
 ```
 
 ### 种子与导出
+```
+seed [名称]            导入种子知识库（默认 oddm-knowledge）
+parse "内容"           AI 解析对话/笔记为知识点（需配置 ARK_API_KEY）
+export-md [文件名]     导出为 Markdown
+export-html [文件名]   导出为 H5 SVG 页面
+```
 
-```
-seed [名称]            导入种子知识库（默认 oddm-knowledge，33个ODDM知识点）
-export-md [文件名]     导出为 Markdown（备份/分享用）
-export-html [文件名]   导出为 H5 SVG 页面（浏览器打开查看，自上而下树状布局）
-```
+### AI 解析命令说明（parse）
+
+`parse` 是白皮书 Phase 1「对话→JSON」解析层的 CLI 落地。工作流程：
+
+1. 校验输入文本与 API Key（环境变量 `ARK_API_KEY`，火山方舟控制台获取）
+2. 调用豆包 Chat Completions API（OpenAI 兼容，`https://ark.cn-beijing.volces.com/api/v3/chat/completions`），系统提示词为 `src/meta-prompt.js`（含三条红线与 Few-Shot 示例）
+3. 返回结果经 `src/schema-validator.js` 校验（轴/状态/摘要/标签/红线3）
+4. 展示解析结果，用户 `y` 确认写入 / `n` 放弃 / `e` 修改主干或状态后写入
+5. 写入走 `KnowledgeTree.addFromAI()`：完整字段落库 + parent_hint 挂载提议 + 自动发现跨干关联
+
+可配置环境变量：
+- `ARK_API_KEY`：API Key（必填才能用 parse）
+- `ARK_MODEL_ID`：模型 ID（默认 doubao-seed-2-1-pro-260628）
+- `ARK_BASE_URL`：API 端点（默认北京区，一般无需改）
 
 ### 其他
 
@@ -72,10 +87,9 @@ exit                  退出
 
 ## 相关文档
 
-- `DESIGN.md`：核心设计文档（产品定位、六条原则、数据模型、技术决策、Web 应用架构、AI 交互方案、与白皮书对齐）
-- `DEVELOPMENT.md`：开发文档（OOP 设计方案、类图、系统架构、核心机制详解、实现路径、开发规范）
-- `CHANGELOG.md`：变更日志
-- `docs/vision-whitepaper.md`：项目概念与愿景白皮书（原始设计文档）
+- `DESIGN.md`：核心设计文档（产品定位、六条原则、数据模型、技术决策、Web 应用架构、AI 交互方案）
+- `CHANGELOG.md`：代码变更日志
+- `docs/vision-whitepaper.md`：Gemini 原设计文档（项目概念与愿景白皮书）
 - `docs/meta-blueprint.md`：Meta-Blueprint 元规范（ODDM 对象数据契约、Meta-Prompt、渲染协议）
 - `seed/oddm-knowledge.json`：33个 ODDM 知识点种子数据
 
@@ -109,7 +123,7 @@ exit                  退出
 2. 判定主干：生活经验→生，工作实践→业，构想想法→思
 3. 判定状态：已验证→实，待验证→虚
 4. 提炼 summary（<30字）和隐性标签（1-3个底层逻辑词）
-5. 用对应命令存入
+5. 用对应命令存入（推荐 `parse "原文"` 由 AI 自动提炼，或直接 `note`/`idea`）
 
 ### 工作流五：对话文本解析对齐（Few-Shot，与白皮书对齐）
 

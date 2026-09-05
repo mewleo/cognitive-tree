@@ -35,6 +35,7 @@
 │ + discoverCrossLinks() → KnowledgeNode[]                  │
 │ + addNote(content, axis, tags) → KnowledgeNode           │
 │ + addIdea(content, tags) → KnowledgeNode                  │
+│ + addFromAI(parsed, rawSource) → KnowledgeNode           │
 │ + renderASCII() → string                                   │
 │ + introspect() → Object                                    │
 │ + toJSON() → Array                                         │
@@ -123,28 +124,28 @@
 │  ├── 命令解析（readline）                              │
 │  ├── 命令分发（commands 对象）                         │
 │  ├── 持久化（save/load → ctree_data.json）            │
-│  └── 导出（export-md / export-html）                  │
-└────────────────────────┬─────────────────────────────┘
-                         │ 调用
-                         ▼
-┌──────────────────────────────────────────────────────┐
-│              KnowledgeTree (领域层/聚合根)              │
-│  ├── 节点管理（addNode/getNode/getByAxis）            │
-│  ├── 热力驱动（touchNode/decayAll）                   │
-│  ├── 认知结晶（suggestCrystallization/crystallize）   │
-│  ├── 跨干启发（discoverCrossLinks）                   │
-│  ├── 快速通道（addNote/addIdea）                      │
-│  ├── 渲染输出（renderASCII）                           │
-│  └── 自省快照（introspect）                            │
-└────────────────────────┬─────────────────────────────┘
-                         │ 拥有/操作
-                         ▼
-┌──────────────────────────────────────────────────────┐
-│              KnowledgeNode (实体层)                     │
-│  ├── 六维属性（axis/state/content/tags/metrics/topo）│
-│  ├── 行为方法（touch/decay/promoteToSolid/...）      │
-│  └── 序列化（toJSON → 对齐 ODDM 契约）                │
-└──────────────────────────────────────────────────────┘
+│  ├── 导出（export-md / export-html）                  │
+│  └── AI 解析（parse 命令 → 确认流程）                  │
+└──────────────┬─────────────────────────┬─────────────┘
+               │ parse 命令              │ 其他命令
+               ▼                         ▼
+┌──────────────────────────────┐  ┌─────────────────────────────┐
+│      AI 解析层 (Phase 1)      │  │   KnowledgeTree (领域层)     │
+│  ┌────────────────────────┐  │  │  ├── 节点管理                │
+│  │ DoubaoParser           │  │  │  ├── 热力驱动                │
+│  │ (ai-parser.js)         │  │  │  ├── 认知结晶                │
+│  │  ├─ 豆包 Chat API 调用 │  │  │  ├── 跨干启发                │
+│  │  └─ fetch 可注入(mock) │  │  │  ├── 快速通道 addNote/addIdea│
+│  │ ┌────────────────────┐ │  │  ├── AI 摄入 addFromAI         │
+│  │ │ SchemaValidator    │ │  │  ├── 渲染 renderASCII          │
+│  │ │ (schema-validator) │ │  │  └── 自省 introspect           │
+│  │ └────────────────────┘ │  └──────────────┬──────────────┘
+│  │ ┌────────────────────┐ │                 │ 拥有/操作
+│  │ │ META_PROMPT        │ │                 ▼
+│  │ │ (meta-prompt.js)   │ │  ┌─────────────────────────────┐
+│  │ └────────────────────┘ │  │   KnowledgeNode (实体层)     │
+│  └────────────────────────┘  │  └─────────────────────────┘
+└──────────────────────────────┘
 ```
 
 ### 2.2 目标架构（Web 应用版本）
@@ -275,8 +276,8 @@
 
 | 白皮书 Phase | 内容 | 当前状态 | 对应本路线图 |
 |-------------|------|---------|-------------|
-| Phase 1 | 数据解析与 Schema 校验（对话→标准 JSON） | ⏳ 未做 | 阶段二（AI 解析层） |
-| Phase 2 | ODDM 对象持久化与查询 | ⏳ JSON 中间态 | 阶段四（ODDM 持久化） |
+| Phase 1 | 数据解析与 Schema 校验（对话→标准 JSON） | 🚧 首步落地（parse 命令 + Schema 校验） | 阶段二（AI 解析层） |
+| Phase 2 | ODDM 对象持久化与查询 | ⏳ JSON 中间态 | 阶段五（ODDM 持久化） |
 | Phase 3 | 热力计算与 CLI 文本树 | ✅ 已完成 | 阶段一 |
 | Phase 4 | 极简 SVG 动态渲染 | ✅ 已完成（树状布局，偏离白皮书放射状，用户决策） | 阶段一/二 |
 
@@ -293,9 +294,19 @@
 - [x] export-md 导出
 - [x] export-html 导出（SVG 树状布局）
 - [x] 种子数据（33个 ODDM 知识点）
-- [x] 31项单元测试全过
+- [x] AI 解析层首步落地（parse 命令：豆包 API → Schema 校验 → 用户确认 → 写入）
+- [x] 65项单元测试全过（KnowledgeNode 12 + KnowledgeTree 25 + schema-validator 14 + ai-parser 14）
 
-### 阶段二：Web 应用基础（下一步）
+### 阶段二：AI 解析层深化（当前 ✅ 首步，深化可选）
+
+- [x] 对话 → KnowledgeNode JSON（parse 命令，豆包 API 接入）
+- [x] Schema 校验（schema-validator.js：轴/状态/摘要/标签/红线3）
+- [x] 用户确认流程（y 写入 / n 放弃 / e 修改主干状态）
+- [x] addFromAI 落库通道（完整字段 + parent_hint 挂载提议 + 自动跨干）
+- [ ] 批量解析（一次多段文本 → 多节点）
+- [ ] 提炼标签复用（AI 基于树内既有标签池对齐，防同义词泛滥）
+
+### 阶段三：Web 应用基础（下一步）
 
 - [ ] 后端 REST API（Node.js + Express/Fastify）
   - [ ] GET /api/nodes（列表/查询/过滤）
@@ -316,16 +327,17 @@
   - [ ] 节点详情面板（查看/编辑）
   - [ ] 管理面板（全局设置/默认层级）
 
-### 阶段三：AI 集成
+### 阶段四：AI 集成深化
 
-- [ ] AI 适配器层（默认豆包 API，可扩展）
-- [ ] 知识提炼管道（对话/文档 → KnowledgeNode JSON → 用户确认）
-- [ ] 标签自动生成（AI 提取 implicit_tags）
+- [x] AI 适配器层（DoubaoParser，fetch 可注入，默认豆包 API）
+- [x] 知识提炼管道（对话/文档 → KnowledgeNode JSON → 用户确认）
+- [x] 标签自动生成（AI 提取 explicit_tags / implicit_tags）
 - [ ] 跨域启发（AI 基于 cross_links 生成启发建议）
 - [ ] 知识水平评估（基于 state/level/heat/children 生成领域掌握度）
 - [ ] 个人偏好背书（AI 回答时引用用户的实节点知识）
+- [ ] 头脑风暴扩展（AI 基于高热力领域生成延伸构想）
 
-### 阶段四：ODDM 持久化 + 部署
+### 阶段五：ODDM 持久化 + 部署
 
 - [ ] 接入 ODDM（github.com/mewleo/oddm）替代 JSON 文件
 - [ ] SQLite 持久化
@@ -343,17 +355,18 @@
 **原则**：先写测试，再写实现；每个功能必须有对应的单元测试。
 
 ```bash
-# 运行所有测试
+# 运行所有测试（注意用通配符，勿用目录参数 test/，会有环境性假失败）
 node --test test/*.test.js
 
 # 运行单个测试文件
-node --test test/KnowledgeNode.test.js
+node --test test/ai-parser.test.js
 ```
 
 **测试覆盖要求**：
 - KnowledgeNode：所有 public 方法必须有测试
-- KnowledgeTree：所有 public 方法必须有测试
+- KnowledgeTree：所有 public 方法必须有测试（含 addFromAI AI 摄入）
 - 核心机制（热力/结晶/跨干关联）必须有集成测试
+- AI 解析层：Schema 校验边界 + 解析器错误分支（mock fetch，不真实调用 API）
 - 边界条件（空树/单节点/深层嵌套）必须有测试
 
 ### 5.2 注释规范
@@ -387,7 +400,7 @@ node --test test/KnowledgeNode.test.js
 | 变量名 | camelCase | `heatScore`, `crossLinks` |
 | 常量 | UPPER_SNAKE_CASE | `HEAT_MAX`, `VALID_AXES` |
 | 私有方法 | 下划线前缀 | `_truncate()`, `_countByState()` |
-| 节点 ID | 语义化前缀 | `oddm_*`, `note_*`, `idea_*` |
+| 节点 ID | 语义化前缀 | `oddm_*`, `note_*`, `idea_*`, `ai_*` |
 
 ### 5.4 提交规范
 
@@ -436,10 +449,15 @@ cognitive-tree/
 ├── src/
 │   ├── KnowledgeNode.js    # 认知节点实体类（六维属性+行为）
 │   ├── KnowledgeTree.js    # 认知树聚合根（核心机制+渲染+持久化）
-│   └── cli.js              # CLI 入口（命令解析+分发+导出）
+│   ├── ai-parser.js        # 豆包 AI 解析适配器（对话→JSON）
+│   ├── schema-validator.js # Schema 校验器（KnowledgeNode 契约）
+│   ├── meta-prompt.js      # AI 解析系统提示词（规则+红线+Few-Shot）
+│   └── cli.js              # CLI 入口（命令解析+分发+导出+AI解析）
 ├── test/
 │   ├── KnowledgeNode.test.js  # 节点单元测试（12项）
-│   └── KnowledgeTree.test.js  # 树单元测试（19项）
+│   ├── KnowledgeTree.test.js  # 树单元测试（25项）
+│   ├── schema-validator.test.js # Schema 校验器测试（14项）
+│   └── ai-parser.test.js      # AI 解析适配器测试（14项）
 ├── seed/
 │   └── oddm-knowledge.json    # ODDM 知识点种子数据（33节点）
 ├── docs/
@@ -486,6 +504,9 @@ note "今天用ODDM重构了存储层"
 
 # 快速存想法
 idea "认知树可以做成浏览器插件"
+
+# AI 解析对话为知识点（需配置 ARK_API_KEY）
+parse "今天调通了Rust的内存释放"
 
 # 查看节点详情
 view <node_id>
