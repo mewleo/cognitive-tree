@@ -46,10 +46,11 @@ crystallize <id> "新表述"  执行结晶升维
 cross                 重新发现跨干关联
 ```
 
-### 导出
+### 种子与导出
 
 ```
-export-md [文件名]     导出为 Markdown 文件
+seed [名称]            导入种子知识库（默认 oddm-knowledge，33个ODDM知识点）
+export-md [文件名]     导出为 Markdown
 export-html [文件名]   导出为 H5 SVG 页面（浏览器打开查看）
 ```
 
@@ -65,6 +66,7 @@ exit                  退出
 ## 节点 ID 说明
 
 - 预置节点 ID：`work_oddm`、`work_oddm_path`、`work_oddm_ref`、`life_sleep`、`life_family`、`thought_tree`、`thought_axis`、`thought_heat`、`thought_crystal`
+- 种子节点 ID 前缀：`oddm_`（共33个，覆盖 ODDM 架构/数据模型/API/工程/版本/应用/哲学）
 - 快速通道生成的节点 ID：`note_xxx` 或 `idea_xxx`
 - `list` 命令中每个节点末尾显示 `[node_id]`
 

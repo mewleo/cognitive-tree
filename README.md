@@ -19,9 +19,21 @@
 # 运行 CLI（自动持久化到 ctree_data.json）
 node src/cli.js
 
+# 进入 CLI 后导入 ODDM 知识种子（33个节点，完整展示干支叶层级与跨干关联）
+ctree> seed oddm-knowledge
+
 # 运行全部单元测试
 node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
 ```
+
+## 种子数据
+
+项目内置 ODDM 知识种子（`seed/oddm-knowledge.json`），包含 33 个节点：
+- **业主干**：ODDM 总览 → 架构/数据模型/API/工程特性/版本演进/应用场景 六大枝 → 20个叶节点
+- **思主干**：设计哲学（北斗寻址/对象数据库法统/九皇之法）+ 未来构想（Data Proxy/Redis存储）
+- 自动建立跨干关联（解耦/极简/演进等隐性标签打通业与思）
+
+导入后用 `export-html` 导出 SVG 脑图，浏览器打开即可看到完整的放射状认知树。
 
 ## 持久化
 
@@ -53,6 +65,7 @@ node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
 | `crystallize <id> <表述>` | 执行结晶升维 |
 | `cross` | 重新发现跨干关联 |
 | `inspect` | 全树自省快照 |
+| `seed [名称]` | 导入种子知识库（默认 oddm-knowledge，33个ODDM知识点） |
 | `export-md [文件名]` | 导出为 Markdown 文件（干支叶层级） |
 | `export-html [文件名]` | 导出为 H5 SVG 页面（浏览器打开查看，可分享） |
 | `help` | 帮助 |
@@ -78,7 +91,12 @@ cognitive-tree/
 ├── src/
 │   ├── KnowledgeNode.js   # 认知节点对象（虚实/热力/结晶/跨干关联）
 │   ├── KnowledgeTree.js   # 树容器（查询/结晶提议/跨干发现/渲染/自省）
-│   └── cli.js             # CLI 交互入口
+│   └── cli.js             # CLI 交互入口（含持久化/导出/种子导入）
+├── seed/
+│   └── oddm-knowledge.json  # ODDM 知识种子（33节点，完整干支叶层级）
+├── docs/
+│   ├── vision-whitepaper.md # 项目愿景白皮书
+│   └── meta-blueprint.md    # 实施元规范
 ├── test/
 │   ├── KnowledgeNode.test.js  # 单元测试
 │   └── KnowledgeTree.test.js  # 单元测试
