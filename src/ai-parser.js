@@ -16,6 +16,8 @@
  * 网络层可注入（fetchImpl），便于单元测试 mock，不真调 API。
  */
 
+const http = require('http');
+const https = require('https');
 const { META_PROMPT } = require('./meta-prompt');
 const { SchemaValidator } = require('./schema-validator');
 
@@ -29,13 +31,16 @@ class DoubaoParser {
    * @param {string} [config.apiKey] - 豆包 API Key，默认读环境变量 ARK_API_KEY
    * @param {string} [config.baseUrl] - API 端点，默认火山方舟北京区
    * @param {string} [config.model] - 模型 ID，默认读 ARK_MODEL_ID 或官方示例模型
-   * @param {Function} [config.fetchImpl] - fetch 实现（测试注入用）
+   * @param {Function} [config.fetchImpl] - 请求实现（测试注入用）。
+   *   默认用 Node 原生 http/https 模块（forceFetch），
+   *   不用内置 fetch（undici）——NixOS/部分环境下 undici 有 IPv6/兼容问题，
+   *   且不读代理。签名兼容 fetch(url, options) 的最小集。
    */
   constructor(config = {}) {
     this.apiKey = config.apiKey || process.env.ARK_API_KEY || '';
     this.baseUrl = config.baseUrl || process.env.ARK_BASE_URL || DEFAULT_BASE_URL;
     this.model = config.model || process.env.ARK_MODEL_ID || DEFAULT_MODEL;
-    this.fetchImpl = config.fetchImpl || globalThis.fetch;
+    this.fetchImpl = config.fetchImpl || forceFetch;
   }
 
   /**
@@ -96,8 +101,7 @@ class DoubaoParser {
             `\n  模型: ${this.model}` +
             `\n  排查: ① 网络能否访问火山方舟（curl 测试）` +
             `\n        ② 模型 ID 是否为你账号下的接入点（默认模型可能不可用，用 ARK_MODEL_ID 覆盖）` +
-            `\n        ③ API Key 是否有该模型的调用权限` +
-            `\n        ④ 若有代理，Node 内置 fetch 不读 npm 代理，需用 HTTPS_PROXY 或 undici ProxyAgent`,
+            `\n        ③ API Key 是否有该模型的调用权限`,
         };
       }
       return { ok: false, error: `AI 调用失败: ${e.message}` };
@@ -177,4 +181,77 @@ function truncate(text, max) {
   return text.length > max ? text.slice(0, max) + '…' : text;
 }
 
-module.exports = { DoubaoParser, extractJson };
+/**
+ * 默认请求实现：Node 原生 http/https 模块，替代内置 fetch(undici)。
+ *
+ * 为什么不用 globalThis.fetch：
+ *  - NixOS + Node v22 等环境下 undici 存在兼容问题（IPv6 优先路由不通时
+ *    回退慢/挂起），实测同一网络下 Node 内置 fetch 超时、https 模块正常。
+ *  - undici 不读 npm 代理环境变量。
+ *
+ * 签名兼容 fetch(url, options) 的最小集：
+ *   { method, headers, body, signal } → { ok, status, text(), json() }
+ *
+ * 特性：
+ *  - family: 4 强制 IPv4，规避 IPv6 DNS 路由问题
+ *  - 自动计算 Content-Length（不依赖 chunked 编码）
+ *  - 支持 AbortSignal（abort 时抛 name=AbortError）
+ *
+ * @param {string} url
+ * @param {Object} [options]
+ * @returns {Promise<{ok: boolean, status: number, text: Function, json: Function}>}
+ */
+function forceFetch(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === 'http:' ? http : https;
+    const headers = Object.assign({}, options.headers);
+    const body = options.body;
+    if (body && !Object.keys(headers).some(k => k.toLowerCase() === 'content-length')) {
+      headers['Content-Length'] = Buffer.byteLength(body);
+    }
+    const req = mod.request({
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'http:' ? 80 : 443),
+      path: u.pathname + u.search,
+      method: options.method || 'GET',
+      headers,
+      family: 4, // 强制 IPv4，规避 IPv6 路由问题
+    }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          async text() { return text; },
+          async json() { return JSON.parse(text); },
+        });
+      });
+    });
+    req.on('error', (e) => {
+      if (options.signal && options.signal.aborted) {
+        const err = new Error('This operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      } else {
+        reject(e);
+      }
+    });
+    // 支持 AbortSignal（超时中止时 abort 请求）
+    if (options.signal) {
+      if (options.signal.aborted) {
+        req.destroy(new Error('This operation was aborted'));
+      } else {
+        options.signal.addEventListener('abort', () => {
+          req.destroy(new Error('This operation was aborted'));
+        });
+      }
+    }
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+module.exports = { DoubaoParser, extractJson, forceFetch };

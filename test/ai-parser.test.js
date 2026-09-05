@@ -4,7 +4,8 @@
  */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { DoubaoParser, extractJson } = require('../src/ai-parser');
+const http = require('http');
+const { DoubaoParser, extractJson, forceFetch } = require('../src/ai-parser');
 
 /** 构造 mock fetch：返回固定 content */
 function mockFetchOk(content) {
@@ -149,4 +150,96 @@ test('可配置 baseUrl 和 model', async () => {
   await parser.parse('测试');
   assert.equal(captured.url, 'https://custom.example.com/v3/chat/completions');
   assert.equal(captured.body.model, 'my-model');
+});
+
+// ── forceFetch（默认请求实现，Node 原生 http/https）──
+function startTestServer(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ server, port: server.address().port });
+    });
+  });
+}
+
+test('forceFetch：POST 请求结构正确（方法/路径/头/体/Content-Length）', async () => {
+  const { server, port } = await startTestServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ echo: { method: req.method, url: req.url, body: JSON.parse(body) } }));
+    });
+  });
+  try {
+    const res = await forceFetch(`http://127.0.0.1:${port}/api/v3/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-key' },
+      body: JSON.stringify({ model: 'm', messages: [] }),
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.echo.method, 'POST');
+    assert.equal(data.echo.url, '/api/v3/chat/completions');
+    assert.equal(data.echo.body.model, 'm');
+    // Content-Length 由 forceFetch 自动计算，body 必须完整可达
+    assert.ok(res.text);
+    const text = await res.text();
+    assert.ok(text.includes('"model":"m"'));
+  } finally {
+    server.close();
+  }
+});
+
+test('forceFetch：HTTP 错误状态返回 ok=false', async () => {
+  const { server, port } = await startTestServer((req, res) => {
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('invalid api key');
+  });
+  try {
+    const res = await forceFetch(`http://127.0.0.1:${port}/x`, { method: 'GET' });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 401);
+    assert.equal(await res.text(), 'invalid api key');
+  } finally {
+    server.close();
+  }
+});
+
+test('forceFetch：AbortSignal 触发时抛 AbortError', async () => {
+  const { server, port } = await startTestServer(() => {
+    // 服务器不响应，等客户端 abort
+  });
+  try {
+    const controller = new AbortController();
+    const p = forceFetch(`http://127.0.0.1:${port}/x`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(p, (e) => e.name === 'AbortError');
+  } finally {
+    server.close();
+  }
+});
+
+test('DoubaoParser 默认使用 forceFetch（不依赖全局 fetch）', async () => {
+  const { server, port } = await startTestServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"axis":"业","state":"实","summary":"默认实现可用","explicit_tags":[],"implicit_tags":["解耦"]}' } }] }));
+    });
+  });
+  try {
+    const parser = new DoubaoParser({ apiKey: 'test-key', baseUrl: `http://127.0.0.1:${port}/v3` });
+    const result = await parser.parse('测试默认请求实现');
+    assert.equal(result.ok, true);
+    assert.equal(result.data.axis, '业');
+    assert.equal(result.data.summary, '默认实现可用');
+  } finally {
+    server.close();
+  }
 });
