@@ -21,7 +21,7 @@ const { SchemaValidator } = require('./schema-validator');
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const DEFAULT_MODEL = 'doubao-seed-2-1-pro-260628';
-const REQUEST_TIMEOUT_MS = 60000; // 60s 超时
+const REQUEST_TIMEOUT_MS = 120000; // 120s 超时（pro 模型首 token 可能较慢）
 
 class DoubaoParser {
   /**
@@ -53,10 +53,23 @@ class DoubaoParser {
   }
 
   /**
+   * 返回当前配置摘要（供 CLI 显示，便于排查）
+   * @returns {{baseUrl: string, model: string, hasKey: boolean, timeoutSec: number}}
+   */
+  getConfig() {
+    return {
+      baseUrl: this.baseUrl,
+      model: this.model,
+      hasKey: !!this.apiKey,
+      timeoutSec: REQUEST_TIMEOUT_MS / 1000,
+    };
+  }
+
+  /**
    * 解析文本为 KnowledgeNode JSON
    * @param {string} text - 用户输入的对话/笔记/想法
    * @returns {Promise<{ok: boolean, data?: Object, error?: string}>}
-   *          ok=true 时 data 为通过 Schema 校验的节点数据
+   *          ok=true 时 data 为通过 Schema 校验的节点数据（含 raw 响应在 meta）
    */
   async parse(text) {
     // 1. 输入校验
@@ -74,6 +87,19 @@ class DoubaoParser {
     try {
       responseText = await this._request(text);
     } catch (e) {
+      // 区分超时与其他网络错误，给出可操作的排查提示
+      if (e.name === 'AbortError' || /abort/i.test(e.message)) {
+        return {
+          ok: false,
+          error: `AI 请求超时（${REQUEST_TIMEOUT_MS / 1000}s 未响应）。` +
+            `\n  端点: ${this.baseUrl}/chat/completions` +
+            `\n  模型: ${this.model}` +
+            `\n  排查: ① 网络能否访问火山方舟（curl 测试）` +
+            `\n        ② 模型 ID 是否为你账号下的接入点（默认模型可能不可用，用 ARK_MODEL_ID 覆盖）` +
+            `\n        ③ API Key 是否有该模型的调用权限` +
+            `\n        ④ 若有代理，Node 内置 fetch 不读 npm 代理，需用 HTTPS_PROXY 或 undici ProxyAgent`,
+        };
+      }
       return { ok: false, error: `AI 调用失败: ${e.message}` };
     }
     // 4. 清洗并解析 JSON

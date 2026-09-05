@@ -376,7 +376,7 @@ const commands = {
     if (!node) { console.log('❌ 节点不存在'); return; }
     console.log('─────────────────────────────────────────');
     console.log(`📌 ${node.summary}`);
-    console.log(`─────────────────────────────────────────`);
+    console.log('─────────────────────────────────────────');
     console.log(`  ID:     ${node.node_id}`);
     console.log(`  主干:   ${node.axis} | 状态: ${node.state} | 层级: L${node.level}`);
     console.log(`  热力:   ${node.heat_score.toFixed(1)}`);
@@ -384,7 +384,7 @@ const commands = {
     console.log(`  隐标签: ${node.implicit_tags.join(', ') || '(无)'}`);
     console.log(`  子节点: ${node.children_ids.join(', ') || '(无)'}`);
     console.log(`  跨干:   ${node.cross_links.join(', ') || '(无)'}`);
-    console.log(`─────────────────────────────────────────`);
+    console.log('─────────────────────────────────────────');
     console.log(`  📄 完整内容:`);
     console.log(`  ${node.raw_source || node.summary}`);
     console.log('─────────────────────────────────────────');
@@ -544,7 +544,8 @@ const commands = {
       console.log(`❌ ${keyCheck.error}`);
       return;
     }
-    console.log('🤖 AI 解析中…');
+    const cfg = parser.getConfig();
+    console.log(`🤖 AI 解析中…（模型: ${cfg.model}，超时: ${cfg.timeoutSec}s）`);
     const result = await parser.parse(text);
     if (!result.ok) {
       console.log(`❌ ${result.error}`);
