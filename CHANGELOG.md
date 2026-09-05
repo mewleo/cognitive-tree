@@ -5,9 +5,17 @@
 ## [Unreleased]
 
 ### Added
-- **AI 跨界启发（智能行为层功能三）**：用户输入瓶颈描述，AI 自动提取隐性标签，在其他主干中查找同标签经验节点，生成真正的跨界类比启发。
-  - `src/meta-prompt.js`：新增 `INSPIRE_PROMPT`——跨界启发系统提示词（指导 AI 基于瓶颈+跨干节点生成≤100字跨界启发，输出 JSON {insight, implicit_tags}）。
-  - `DoubaoParser.inspire(bottleneck, relatedNodes)`：输入校验→Key校验→格式化→_request(INSPIRE_PROMPT)→JSON解析→字段校验→返回{ok, insight, implicit_tags}。
+- **AI 主动扩展学习（智能行为层功能四）**：`grow [N]` 命令——整合三个子能力的主动学习入口。
+  - 子能力1「高热力延伸」：`KnowledgeTree.getTopHeatNodes(n)` 返回热力最高的N个节点；`DoubaoParser.growExtension(node)` 基于节点内容+隐性标签AI生成2-3个延伸知识点，提议用户存入（默认虚节点）。
+  - 子能力2「知识空白检测」：`KnowledgeTree.findKnowledgeIslands()` 扫描隐性标签池，返回只有1个节点的知识孤岛标签，提示用户补充。
+  - 子能力3「虚叶引力」：`KnowledgeTree.attractVirtualLeaves()` 虚节点主动寻找同隐性标签实节点建立cross_link；`findVirtualLeavesWithoutSupport()` 检测无实践支撑的虚节点。
+  - `meta-prompt.js`：新增 `GROW_PROMPT`——高热力延伸系统提示词（输出JSON extensions数组，每点≤30字）。
+  - `grow` 命令三步流程：知识空白检测→虚叶引力→高热力延伸（AI逐个生成延伸点并提议存入）。
+  - 设计原则：AI只提议不自动写入（主权在人），扩展内容默认虚节点。
+  - 测试新增19项（KnowledgeTree 12 + ai-parser 7），总数达112项全过。
+- **AI 跨界启发（智能行为层功能三）**：`inspire "瓶颈"` 命令——AI 基于跨干经验节点生成跨界类比建议。
+  - `meta-prompt.js`：新增 `INSPIRE_PROMPT`——跨界启发系统提示词（指导 AI 基于瓶颈+跨干节点生成≤100字跨界启发，输出 JSON 含 insight + implicit_tags）。
+  - `DoubaoParser.inspire(bottleneck, relatedNodes)`：输入瓶颈+跨干相关节点，AI 输出 `{ok, insight, implicit_tags}`。
   - `KnowledgeTree.findCrossNodesByTags(tags, excludeAxis, limit=5)`：基于隐性标签找其他主干节点，按热力降序，默认最多5个。
   - `inspire` 命令：四步流程（AI解析瓶颈提取标签→findCrossNodesByTags找跨干节点→AI生成启发→可选存为思主干虚节点）。
   - 测试新增 12 项（findCrossNodesByTags 5 + inspire 7），总数达 93 项全过。
