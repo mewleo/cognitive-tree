@@ -18,7 +18,7 @@
 
 const http = require('http');
 const https = require('https');
-const { META_PROMPT, CRYSTALLIZATION_PROMPT } = require('./meta-prompt');
+const { META_PROMPT, CRYSTALLIZATION_PROMPT, INSPIRE_PROMPT } = require('./meta-prompt');
 const { SchemaValidator } = require('./schema-validator');
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
@@ -26,16 +26,6 @@ const DEFAULT_MODEL = 'doubao-seed-2-1-pro-260628';
 const REQUEST_TIMEOUT_MS = 120000; // 120s 超时（pro 模型首 token 可能较慢）
 
 class DoubaoParser {
-  /**
-   * @param {Object} [config]
-   * @param {string} [config.apiKey] - 豆包 API Key，默认读环境变量 ARK_API_KEY
-   * @param {string} [config.baseUrl] - API 端点，默认火山方舟北京区
-   * @param {string} [config.model] - 模型 ID，默认读 ARK_MODEL_ID 或官方示例模型
-   * @param {Function} [config.fetchImpl] - 请求实现（测试注入用）。
-   *   默认用 Node 原生 http/https 模块（forceFetch），
-   *   不用内置 fetch（undici）——NixOS/部分环境下 undici 有 IPv6/兼容问题，
-   *   且不读代理。签名兼容 fetch(url, options) 的最小集。
-   */
   constructor(config = {}) {
     this.apiKey = config.apiKey || process.env.ARK_API_KEY || '';
     this.baseUrl = config.baseUrl || process.env.ARK_BASE_URL || DEFAULT_BASE_URL;
@@ -43,10 +33,6 @@ class DoubaoParser {
     this.fetchImpl = config.fetchImpl || forceFetch;
   }
 
-  /**
-   * 检查 API Key 是否已配置
-   * @returns {{ok: boolean, error: string|null}}
-   */
   checkKey() {
     if (!this.apiKey) {
       return {
@@ -57,10 +43,6 @@ class DoubaoParser {
     return { ok: true, error: null };
   }
 
-  /**
-   * 返回当前配置摘要（供 CLI 显示，便于排查）
-   * @returns {{baseUrl: string, model: string, hasKey: boolean, timeoutSec: number}}
-   */
   getConfig() {
     return {
       baseUrl: this.baseUrl,
@@ -70,29 +52,19 @@ class DoubaoParser {
     };
   }
 
-  /**
-   * 解析文本为 KnowledgeNode JSON
-   * @param {string} text - 用户输入的对话/笔记/想法
-   * @returns {Promise<{ok: boolean, data?: Object, error?: string}>}
-   *          ok=true 时 data 为通过 Schema 校验的节点数据（含 raw 响应在 meta）
-   */
   async parse(text) {
-    // 1. 输入校验
     const textCheck = SchemaValidator.validateText(text);
     if (!textCheck.ok) {
       return { ok: false, error: textCheck.error };
     }
-    // 2. Key 校验
     const keyCheck = this.checkKey();
     if (!keyCheck.ok) {
       return { ok: false, error: keyCheck.error };
     }
-    // 3. 构造并发送请求
     let responseText;
     try {
       responseText = await this._request(META_PROMPT, text);
     } catch (e) {
-      // 区分超时与其他网络错误，给出可操作的排查提示
       if (e.name === 'AbortError' || /abort/i.test(e.message)) {
         return {
           ok: false,
@@ -106,14 +78,12 @@ class DoubaoParser {
       }
       return { ok: false, error: `AI 调用失败: ${e.message}` };
     }
-    // 4. 清洗并解析 JSON
     let parsed;
     try {
       parsed = JSON.parse(extractJson(responseText));
     } catch (e) {
       return { ok: false, error: `AI 返回非合法 JSON: ${truncate(responseText, 120)}` };
     }
-    // 5. Schema 校验
     const check = SchemaValidator.validateNode(parsed);
     if (!check.ok) {
       return { ok: false, error: `解析结果未通过 Schema 校验: ${check.errors.join('; ')}` };
@@ -121,52 +91,27 @@ class DoubaoParser {
     return { ok: true, data: check.data };
   }
 
-  /**
-   * 认知结晶归纳——将一组底层碎片降维为高阶第一性原理表述
-   *
-   * 【设计意图】
-   * 白皮书第4节"认知结晶"：当底层零散经验积累到一定程度，
-   * 单独调一次 AI（用户确认多调用没坏处，理解更透彻），
-   * 基于子节点内容生成高阶表述，供用户确认是否执行结晶。
-   *
-   * 【主权在人】
-   * 本方法只生成提议表述，不执行结晶。结晶操作由 KnowledgeTree.crystallize
-   * 在用户确认后执行。
-   *
-   * @param {Array<{summary: string, raw_source?: string, axis: string, state: string}>} childrenNodes
-   *   同一父节点下的子节点列表（至少1个，实际结晶条件≥3个）
-   * @returns {Promise<{ok: boolean, summary?: string, error?: string}>}
-   *   ok=true 时 summary 为 AI 生成的高阶表述（≤50字）
-   */
   async summarizeForCrystallization(childrenNodes) {
-    // 1. 输入校验
     if (!Array.isArray(childrenNodes) || childrenNodes.length === 0) {
       return { ok: false, error: '结晶归纳至少需要1个子节点' };
     }
-    // 2. Key 校验
     const keyCheck = this.checkKey();
     if (!keyCheck.ok) {
       return { ok: false, error: keyCheck.error };
     }
-    // 3. 格式化子节点内容为 user message
     const userText = childrenNodes.map((n, i) => {
       const src = n.raw_source ? `\n  原文: ${n.raw_source}` : '';
       return `${i + 1}. [${n.axis}/${n.state}] ${n.summary}${src}`;
     }).join('\n');
-    // 4. 发送请求（用结晶提示词，单独一次 AI 调用）
     let responseText;
     try {
       responseText = await this._request(CRYSTALLIZATION_PROMPT, userText);
     } catch (e) {
       if (e.name === 'AbortError' || /abort/i.test(e.message)) {
-        return {
-          ok: false,
-          error: `结晶归纳 AI 请求超时（${REQUEST_TIMEOUT_MS / 1000}s）`,
-        };
+        return { ok: false, error: `结晶归纳 AI 请求超时（${REQUEST_TIMEOUT_MS / 1000}s）` };
       }
       return { ok: false, error: `结晶归纳 AI 调用失败: ${e.message}` };
     }
-    // 5. 清洗结果（去掉可能的引号、空白、代码块）
     const summary = extractJson(responseText) || responseText.trim().replace(/^["'「『]+|["'」』]+$/g, '').trim();
     if (!summary || summary.length === 0) {
       return { ok: false, error: '结晶归纳 AI 返回空文本' };
@@ -174,12 +119,47 @@ class DoubaoParser {
     return { ok: true, summary };
   }
 
-  /**
-   * 发送 Chat Completions 请求（可被 mock 替换）
-   * @param {string} systemPrompt - 系统提示词
-   * @param {string} userText - 用户消息内容
-   * @returns {Promise<string>} 模型回复的原始文本
-   */
+  async inspire(bottleneck, relatedNodes) {
+    if (!bottleneck || typeof bottleneck !== 'string' || bottleneck.trim().length === 0) {
+      return { ok: false, error: '瓶颈描述不能为空' };
+    }
+    if (!Array.isArray(relatedNodes) || relatedNodes.length === 0) {
+      return { ok: false, error: '没有相关节点可供跨界启发' };
+    }
+    const keyCheck = this.checkKey();
+    if (!keyCheck.ok) {
+      return { ok: false, error: keyCheck.error };
+    }
+    const nodesText = relatedNodes.map((n, i) => {
+      const src = n.raw_source ? `\n  原文: ${n.raw_source}` : '';
+      return `${i + 1}. [${n.axis}/${n.state}] ${n.summary}${src}`;
+    }).join('\n');
+    const userText = `瓶颈：${bottleneck.trim()}\n\n相关经验（来自其他领域）：\n${nodesText}`;
+    let responseText;
+    try {
+      responseText = await this._request(INSPIRE_PROMPT, userText);
+    } catch (e) {
+      if (e.name === 'AbortError' || /abort/i.test(e.message)) {
+        return { ok: false, error: `跨界启发 AI 请求超时（${REQUEST_TIMEOUT_MS / 1000}s）` };
+      }
+      return { ok: false, error: `跨界启发 AI 调用失败: ${e.message}` };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(extractJson(responseText));
+    } catch (e) {
+      return { ok: false, error: `跨界启发 AI 返回非合法 JSON: ${truncate(responseText, 120)}` };
+    }
+    if (!parsed.insight || typeof parsed.insight !== 'string') {
+      return { ok: false, error: '跨界启发结果缺少 insight 字段' };
+    }
+    return {
+      ok: true,
+      insight: parsed.insight.trim(),
+      implicit_tags: Array.isArray(parsed.implicit_tags) ? parsed.implicit_tags : [],
+    };
+  }
+
   async _request(systemPrompt, userText) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -192,7 +172,7 @@ class DoubaoParser {
         },
         body: JSON.stringify({
           model: this.model,
-          temperature: 0.3, // 低温度，保证解析稳定性
+          temperature: 0.3,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText },
@@ -216,11 +196,6 @@ class DoubaoParser {
   }
 }
 
-/**
- * 从模型回复中提取 JSON 文本（容忍 ```json 代码块包裹）
- * @param {string} text
- * @returns {string}
- */
 function extractJson(text) {
   const trimmed = text.trim();
   const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
@@ -228,33 +203,10 @@ function extractJson(text) {
   return trimmed;
 }
 
-/**
- * 截断长文本用于错误提示
- */
 function truncate(text, max) {
   return text.length > max ? text.slice(0, max) + '…' : text;
 }
 
-/**
- * 默认请求实现：Node 原生 http/https 模块，替代内置 fetch(undici)。
- *
- * 为什么不用 globalThis.fetch：
- *  - NixOS + Node v22 等环境下 undici 存在兼容问题（IPv6 优先路由不通时
- *    回退慢/挂起），实测同一网络下 Node 内置 fetch 超时、https 模块正常。
- *  - undici 不读 npm 代理环境变量。
- *
- * 签名兼容 fetch(url, options) 的最小集：
- *   { method, headers, body, signal } → { ok, status, text(), json() }
- *
- * 特性：
- *  - family: 4 强制 IPv4，规避 IPv6 DNS 路由问题
- *  - 自动计算 Content-Length（不依赖 chunked 编码）
- *  - 支持 AbortSignal（abort 时抛 name=AbortError）
- *
- * @param {string} url
- * @param {Object} [options]
- * @returns {Promise<{ok: boolean, status: number, text: Function, json: Function}>}
- */
 function forceFetch(url, options = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -270,7 +222,7 @@ function forceFetch(url, options = {}) {
       path: u.pathname + u.search,
       method: options.method || 'GET',
       headers,
-      family: 4, // 强制 IPv4，规避 IPv6 路由问题
+      family: 4,
     }, (res) => {
       let text = '';
       res.setEncoding('utf8');
@@ -293,7 +245,6 @@ function forceFetch(url, options = {}) {
         reject(e);
       }
     });
-    // 支持 AbortSignal（超时中止时 abort 请求）
     if (options.signal) {
       if (options.signal.aborted) {
         req.destroy(new Error('This operation was aborted'));
