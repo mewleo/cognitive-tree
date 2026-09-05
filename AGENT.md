@@ -50,8 +50,8 @@ cross                 重新发现跨干关联
 
 ```
 seed [名称]            导入种子知识库（默认 oddm-knowledge，33个ODDM知识点）
-export-md [文件名]     导出为 Markdown
-export-html [文件名]   导出为 H5 SVG 页面（浏览器打开查看）
+export-md [文件名]     导出为 Markdown（备份/分享用）
+export-html [文件名]   导出为 H5 SVG 页面（浏览器打开查看，自上而下树状布局）
 ```
 
 ### 其他
@@ -66,9 +66,18 @@ exit                  退出
 ## 节点 ID 说明
 
 - 预置节点 ID：`work_oddm`、`work_oddm_path`、`work_oddm_ref`、`life_sleep`、`life_family`、`thought_tree`、`thought_axis`、`thought_heat`、`thought_crystal`
-- 种子节点 ID 前缀：`oddm_`（共33个，覆盖 ODDM 架构/数据模型/API/工程/版本/应用/哲学）
+- 种子数据节点 ID：`oddm_*` 前缀（33个 ODDM 知识点）
 - 快速通道生成的节点 ID：`note_xxx` 或 `idea_xxx`
-- `list` 命令中每个节点末尾显示 `[node_id]`
+- `list` 命令不显示 node_id（保持简洁），用 `view <node_id>` 查看详情
+
+## 相关文档
+
+- `DESIGN.md`：核心设计文档（产品定位、六条原则、数据模型、技术决策、Web 应用架构、AI 交互方案）
+- `DEVELOPMENT.md`：开发文档（OOP 设计方案、类图、系统架构、核心机制详解、实现路径、开发规范）
+- `CHANGELOG.md`：变更日志
+- `docs/vision-whitepaper.md`：Gemini 原设计文档（项目概念与愿景白皮书）
+- `docs/meta-blueprint.md`：Meta-Blueprint 元规范（ODDM 对象数据契约、Meta-Prompt、渲染协议）
+- `seed/oddm-knowledge.json`：33个 ODDM 知识点种子数据
 
 ## AI 典型工作流
 
@@ -106,3 +115,4 @@ exit                  退出
 4. **AI 扩展的知识点不主动推送**，存入后静默存在，由用户自行浏览
 5. **隐性标签要提取底层逻辑**（如"解耦""复利""熵增""边界""涌现"），不是业务关键词
 6. **每次操作后建议用 `list` 确认结果**
+7. **推送代码前必须用户确认**：代码修改后先告知用户，等用户说"推送"再推送到 GitHub
