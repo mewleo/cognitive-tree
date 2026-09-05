@@ -7,7 +7,6 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { DoubaoParser, extractJson, forceFetch } = require('../src/ai-parser');
 
-/** 构造 mock fetch：返回固定 content */
 function mockFetchOk(content) {
   return async () => ({
     ok: true,
@@ -15,7 +14,6 @@ function mockFetchOk(content) {
   });
 }
 
-/** 构造 mock fetch：返回 HTTP 错误 */
 function mockFetchError(status, body) {
   return async () => ({
     ok: false,
@@ -152,7 +150,6 @@ test('可配置 baseUrl 和 model', async () => {
   assert.equal(captured.body.model, 'my-model');
 });
 
-// ── forceFetch（默认请求实现，Node 原生 http/https）──
 function startTestServer(handler) {
   return new Promise((resolve) => {
     const server = http.createServer(handler);
@@ -183,7 +180,6 @@ test('forceFetch：POST 请求结构正确（方法/路径/头/体/Content-Lengt
     assert.equal(data.echo.method, 'POST');
     assert.equal(data.echo.url, '/api/v3/chat/completions');
     assert.equal(data.echo.body.model, 'm');
-    // Content-Length 由 forceFetch 自动计算，body 必须完整可达
     assert.ok(res.text);
     const text = await res.text();
     assert.ok(text.includes('"model":"m"'));
@@ -208,9 +204,7 @@ test('forceFetch：HTTP 错误状态返回 ok=false', async () => {
 });
 
 test('forceFetch：AbortSignal 触发时抛 AbortError', async () => {
-  const { server, port } = await startTestServer(() => {
-    // 服务器不响应，等客户端 abort
-  });
+  const { server, port } = await startTestServer(() => {});
   try {
     const controller = new AbortController();
     const p = forceFetch(`http://127.0.0.1:${port}/x`, {
@@ -244,8 +238,6 @@ test('DoubaoParser 默认使用 forceFetch（不依赖全局 fetch）', async ()
   }
 });
 
-// ─── 认知结晶 AI 化：summarizeForCrystallization ───
-
 test('结晶归纳：正常将子节点碎片归纳为高阶表述', async () => {
   const parser = new DoubaoParser({
     apiKey: 'test-key',
@@ -276,7 +268,6 @@ test('结晶归纳：AI返回空文本返回错误', async () => {
   const children = [{ summary: '碎片A', axis: '业', state: '实' }];
   const result = await parser.summarizeForCrystallization(children);
   assert.equal(result.ok, false);
-  // _request 层会拦截空 content 抛错，或清洗后为空——两种都应返回错误
   assert.ok(result.error && result.error.length > 0);
 });
 
@@ -307,12 +298,94 @@ test('结晶归纳：请求体使用结晶提示词并包含子节点内容', as
   ];
   await parser.summarizeForCrystallization(children);
   assert.ok(capturedBody, '请求体应被捕获');
-  // system 消息应包含结晶提示词
   const sysMsg = capturedBody.messages.find(m => m.role === 'system');
   assert.ok(sysMsg.content.includes('认知结晶'), 'system prompt 应包含结晶归纳指令');
-  // user 消息应包含子节点摘要
   const userMsg = capturedBody.messages.find(m => m.role === 'user');
   assert.ok(userMsg.content.includes('碎片A内容'), 'user message 应包含子节点摘要');
   assert.ok(userMsg.content.includes('碎片B内容'), 'user message 应包含所有子节点');
   assert.ok(userMsg.content.includes('原始A'), 'user message 应包含 raw_source');
+});
+
+// ─── 功能三：AI 跨界启发 inspire ───
+
+test('跨界启发：正常生成启发建议', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchOk('{"insight": "像ODDM那样每个角色只暴露标准接口，沟通成本会暴跌", "implicit_tags": ["解耦", "边界"]}'),
+  });
+  const result = await parser.inspire('团队沟通成本太高', [
+    { summary: 'ODDM模块分离', axis: '业', state: '实' },
+    { summary: '家庭分工明确', axis: '生', state: '实' },
+  ]);
+  assert.equal(result.ok, true);
+  assert.ok(result.insight.includes('标准接口'));
+  assert.deepEqual(result.implicit_tags, ['解耦', '边界']);
+});
+
+test('跨界启发：空瓶颈描述返回错误', async () => {
+  const parser = new DoubaoParser({ apiKey: 'test-key', fetchImpl: mockFetchOk('{}') });
+  const result = await parser.inspire('   ', [{ summary: 'x', axis: '业', state: '实' }]);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('瓶颈描述不能为空'));
+});
+
+test('跨界启发：无相关节点返回错误', async () => {
+  const parser = new DoubaoParser({ apiKey: 'test-key', fetchImpl: mockFetchOk('{}') });
+  const result = await parser.inspire('测试瓶颈', []);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('没有相关节点'));
+});
+
+test('跨界启发：AI返回非JSON返回错误', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchOk('抱歉我无法生成启发'),
+  });
+  const result = await parser.inspire('测试', [{ summary: 'x', axis: '业', state: '实' }]);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('非合法 JSON'));
+});
+
+test('跨界启发：缺少insight字段返回错误', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchOk('{"implicit_tags": ["解耦"]}'),
+  });
+  const result = await parser.inspire('测试', [{ summary: 'x', axis: '业', state: '实' }]);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('insight'));
+});
+
+test('跨界启发：HTTP错误返回清晰错误', async () => {
+  const parser = new DoubaoParser({
+    apiKey: 'test-key',
+    fetchImpl: mockFetchError(500, 'server error'),
+  });
+  const result = await parser.inspire('测试', [{ summary: 'x', axis: '业', state: '实' }]);
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('HTTP 500'));
+});
+
+test('跨界启发：请求体使用INSPIRE_PROMPT并包含瓶颈和相关节点', async () => {
+  let capturedBody = null;
+  const fetchImpl = async (url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '{"insight": "测试启发", "implicit_tags": []}' } }] }),
+    };
+  };
+  const parser = new DoubaoParser({ apiKey: 'test-key', fetchImpl });
+  await parser.inspire('团队沟通成本太高', [
+    { summary: 'ODDM模块分离', axis: '业', state: '实', raw_source: '每个对象只暴露ref接口' },
+    { summary: '家庭分工明确', axis: '生', state: '实' },
+  ]);
+  assert.ok(capturedBody, '请求体应被捕获');
+  const sysMsg = capturedBody.messages.find(m => m.role === 'system');
+  assert.ok(sysMsg.content.includes('跨界启发'), 'system prompt 应包含跨界启发指令');
+  const userMsg = capturedBody.messages.find(m => m.role === 'user');
+  assert.ok(userMsg.content.includes('团队沟通成本太高'), 'user message 应包含瓶颈描述');
+  assert.ok(userMsg.content.includes('ODDM模块分离'), 'user message 应包含相关节点');
+  assert.ok(userMsg.content.includes('家庭分工明确'), 'user message 应包含所有相关节点');
+  assert.ok(userMsg.content.includes('每个对象只暴露ref接口'), 'user message 应包含 raw_source');
 });
