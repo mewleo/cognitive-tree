@@ -16,24 +16,39 @@
 ## 快速开始
 
 ```bash
-# 运行 CLI（自动持久化到 ctree_data.json）
+# 1.（可选）配置豆包 API Key，启用 AI 解析能力
+export ARK_API_KEY=你的火山方舟APIKey
+
+# 2. 运行 CLI（自动持久化到 ctree_data.json）
 node src/cli.js
 
-# 进入 CLI 后导入 ODDM 知识种子（33个节点，完整展示干支叶层级与跨干关联）
-ctree> seed oddm-knowledge
-
-# 运行全部单元测试
-node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
+# 3. 运行全部单元测试
+node --test test/*.test.js
 ```
 
-## 种子数据
+## AI 解析层（对话 → 知识点）
 
-项目内置 ODDM 知识种子（`seed/oddm-knowledge.json`），包含 33 个节点：
-- **业主干**：ODDM 总览 → 架构/数据模型/API/工程特性/版本演进/应用场景 六大枝 → 20个叶节点
-- **思主干**：设计哲学（北斗寻址/对象数据库法统/九皇之法）+ 未来构想（Data Proxy/Redis存储）
-- 自动建立跨干关联（解耦/极简/演进等隐性标签打通业与思）
+白皮书 Phase 1 的首步落地。输入一段对话/笔记/想法，AI 自动提炼为知识节点，**经你确认后**写入树。
 
-导入后用 `export-html` 导出 SVG 脑图，浏览器打开即可看到完整的放射状认知树。
+```bash
+ctree> parse "今天调通了 Rust 的内存释放，单播原则下不会内存泄漏"
+🤖 AI 解析中…
+─────────────────────────────────────────
+🧠 AI 解析结果（待确认，主权在你）
+─────────────────────────────────────────
+  主干:   业
+  状态:   实（已验证经验）
+  摘要:   Rust内存释放验证：单播原则下无泄漏
+  显标签: Rust, 内存管理
+  隐标签: 所有权, 单播原则
+─────────────────────────────────────────
+写入认知树？[y=写入 / n=放弃 / e=修改后写入]
+```
+
+- **配置**：环境变量 `ARK_API_KEY`（火山方舟控制台获取），可选 `ARK_MODEL_ID` 指定模型
+- **校验**：解析结果必须通过 Schema 校验（轴/状态/摘要/标签/红线），非法结果被拦截
+- **主权在人**：AI 只提议，`y` 才写入；`e` 可修改主干与状态后写入
+- **无 Key 也可用**：AI 通道不可用时，`note`/`idea` 快速通道照常工作
 
 ## 持久化
 
@@ -66,6 +81,7 @@ node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
 | `cross` | 重新发现跨干关联 |
 | `inspect` | 全树自省快照 |
 | `seed [名称]` | 导入种子知识库（默认 oddm-knowledge，33个ODDM知识点） |
+| `parse "内容"` | AI 解析对话/笔记为知识点（需配置 ARK_API_KEY） |
 | `export-md [文件名]` | 导出为 Markdown 文件（干支叶层级） |
 | `export-html [文件名]` | 导出为 H5 SVG 页面（浏览器打开查看，可分享） |
 | `help` | 帮助 |
@@ -82,7 +98,7 @@ node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
 
 两种输入流程：
 - **用户侧输入**：先存完整内容，summary 自动截断，AI 可后补提炼标签
-- **AI 对话总结**：AI 直接带 summary + 标签一块提交
+- **AI 对话总结**：`parse "内容"` 直接由 AI 提炼 summary + 显隐标签一块提交（需配置 ARK_API_KEY）
 
 ## 项目结构
 
@@ -90,8 +106,11 @@ node --test test/KnowledgeNode.test.js test/KnowledgeTree.test.js
 cognitive-tree/
 ├── src/
 │   ├── KnowledgeNode.js   # 认知节点对象（虚实/热力/结晶/跨干关联）
-│   ├── KnowledgeTree.js   # 树容器（查询/结晶提议/跨干发现/渲染/自省）
-│   └── cli.js             # CLI 交互入口（含持久化/导出/种子导入）
+│   ├── KnowledgeTree.js   # 树容器（查询/结晶提议/跨干发现/AI摄入/渲染/自省）
+│   ├── ai-parser.js       # 豆包 AI 解析适配器（对话→KnowledgeNode JSON）
+│   ├── schema-validator.js# KnowledgeNode JSON Schema 校验器
+│   ├── meta-prompt.js     # AI 解析系统提示词（规则+红线+Few-Shot）
+│   └── cli.js             # CLI 交互入口（含持久化/导出/种子导入/AI解析）
 ├── seed/
 │   └── oddm-knowledge.json  # ODDM 知识种子（33节点，完整干支叶层级）
 ├── docs/
@@ -99,7 +118,9 @@ cognitive-tree/
 │   └── meta-blueprint.md    # 实施元规范
 ├── test/
 │   ├── KnowledgeNode.test.js  # 单元测试
-│   └── KnowledgeTree.test.js  # 单元测试
+│   ├── KnowledgeTree.test.js  # 单元测试
+│   ├── schema-validator.test.js # Schema 校验器测试
+│   └── ai-parser.test.js      # AI 解析适配器测试（mock，不真实调用）
 ├── package.json
 ├── AGENT.md              # AI 模型调用指南
 └── README.md
@@ -111,7 +132,7 @@ cognitive-tree/
 - `KnowledgeNode.toJSON()` 输出符合 Meta-Blueprint 的对象 Schema
 - `KnowledgeTree.introspect()` 对齐 ODDM 的 `introspect()` 自省理念
 - 拓扑通过 `parent_id / children_ids / cross_links` 引用关联天然形成，无外键
-- 当前为 JSON 文件持久化，后续可平滑接入 ODDM 持久化
+- 当前为内存存储，后续可平滑接入 ODDM 持久化（替换存储层即可）
 
 ## 设计约束
 
@@ -120,7 +141,3 @@ cognitive-tree/
 - 热力有上限（10），衰减不低于 0
 - 跨干关联自动去重
 - 零第三方依赖，纯 Node.js 内置模块
-
-## License
-
-Apache-2.0
