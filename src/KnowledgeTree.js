@@ -6,9 +6,7 @@
 const { KnowledgeNode } = require('./KnowledgeNode');
 
 class KnowledgeTree {
-  constructor() {
-    this.nodes = new Map();
-  }
+  constructor() { this.nodes = new Map(); }
 
   addNode(node) { this.nodes.set(node.node_id, node); return node; }
   getNode(node_id) { return this.nodes.get(node_id) || null; }
@@ -105,13 +103,15 @@ class KnowledgeTree {
       const renderNode = (node, prefix, isLast) => {
         const connector = isLast ? '└── ' : '├── ';
         const stateMark = node.state === '实' ? '●' : '○';
-        const levelMark = node.level > 1 ? `[L${node.level}]` : '';
-        const heatBars = '🔥'.repeat(Math.min(5, Math.ceil(node.heat_score / 2)));
-        const implicit = node.implicit_tags.length > 0 ? ` (${node.implicit_tags.join(', ')})` : '';
-        const cross = node.cross_links.length > 0 ? ` ──> 跨干: ${node.cross_links.join(', ')}` : '';
-        const idTag = ` [${node.node_id}]`;
+        const levelMark = node.level > 1 ? `L${node.level} ` : '';
+        const heatBars = '🔥'.repeat(Math.min(3, Math.ceil(node.heat_score / 2)));
+        const tagCount = node.implicit_tags.length;
+        const implicit = tagCount > 0
+          ? ` ·${node.implicit_tags.slice(0, 2).join('·')}${tagCount > 2 ? '+' + (tagCount - 2) : ''}`
+          : '';
+        const cross = node.cross_links.length > 0 ? ` ↔${node.cross_links.length}` : '';
         const longContent = node.raw_source && node.raw_source.length > 100 ? ' 📄' : '';
-        lines.push(`${prefix}${connector}${stateMark} ${levelMark}${node.summary}${implicit} ${heatBars}${cross}${longContent}${idTag}`);
+        lines.push(`${prefix}${connector}${stateMark} ${levelMark}${node.summary}${implicit} ${heatBars}${cross}${longContent}`);
         const children = childrenMap.get(node.node_id) || [];
         if (children.length > 0) {
           const newPrefix = prefix + (isLast ? '    ' : '│   ');
