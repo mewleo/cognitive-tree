@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- **AI 跨界启发（智能行为层功能三）**：用户输入瓶颈描述，AI 自动提取隐性标签，在其他主干中查找同标签经验节点，生成真正的跨界类比启发。
+  - `src/meta-prompt.js`：新增 `INSPIRE_PROMPT`——跨界启发系统提示词（指导 AI 基于瓶颈+跨干节点生成≤100字跨界启发，输出 JSON {insight, implicit_tags}）。
+  - `DoubaoParser.inspire(bottleneck, relatedNodes)`：输入校验→Key校验→格式化→_request(INSPIRE_PROMPT)→JSON解析→字段校验→返回{ok, insight, implicit_tags}。
+  - `KnowledgeTree.findCrossNodesByTags(tags, excludeAxis, limit=5)`：基于隐性标签找其他主干节点，按热力降序，默认最多5个。
+  - `inspire` 命令：四步流程（AI解析瓶颈提取标签→findCrossNodesByTags找跨干节点→AI生成启发→可选存为思主干虚节点）。
+  - 测试新增 12 项（findCrossNodesByTags 5 + inspire 7），总数达 93 项全过。
 - **落叶化土（智能行为层功能二）**：热力低于阈值的节点自动视觉淡化（落叶化土），数据永久留存，touch 可唤醒。
   - `KnowledgeNode.COMPOST_THRESHOLD = 0.3`：默认化土阈值（可通过 `isCompost(threshold)` 自定义）。
   - `KnowledgeNode.isCompost(threshold)`：判断节点是否已化土（heat_score 严格低于阈值）。
