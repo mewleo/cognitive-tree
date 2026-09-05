@@ -1,613 +1,518 @@
 #!/usr/bin/env node
 /**
- * ODDM 认知树 - CLI 交互工具
+ * cli.js - ODDM 认知树 CLI 交互入口
  *
- * 用法: node src/cli.js
- * 持久化: 自动保存到 ctree_data.json
+ * 【架构定位】
+ * 这是认知树系统的用户交互层（Interface Layer），负责：
+ *   1. 命令解析与分发
+ *   2. 交互式输入输出（readline）
+ *   3. 持久化加载/保存（JSON 文件）
+ *   4. 调用 KnowledgeTree（领域层）和 DoubaoParser（AI 层）
+ *
+ * 【设计原则】
+ *   - 单一职责：CLI 只做交互，不包含业务逻辑
+ *   - 业务逻辑全部在 KnowledgeTree / KnowledgeNode / DoubaoParser 中
+ *   - 所有写操作后自动持久化
  */
 const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
-const { KnowledgeNode } = require('./KnowledgeNode');
 const { KnowledgeTree } = require('./KnowledgeTree');
+const { KnowledgeNode } = require('./KnowledgeNode');
 const { DoubaoParser } = require('./ai-parser');
+const { SchemaValidator } = require('./schema-validator');
 
 const DATA_FILE = path.join(process.cwd(), 'ctree_data.json');
+const SEED_DIR = path.join(__dirname, '..', 'seed');
 
-let tree = new KnowledgeTree();
+let tree = KnowledgeTree.fromJSON(loadData());
+const parser = new DoubaoParser();
 
-function save() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(tree.toJSON(), null, 2), 'utf-8');
-  } catch (e) {
-    console.error('保存失败:', e.message);
-  }
+function loadData() {
+  try { if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { console.error('加载数据失败:', e.message); }
+  return [];
 }
 
-function load() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-      tree = KnowledgeTree.fromJSON(data);
-      return true;
+function saveData() {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(tree.toJSON(), null, 2), 'utf8'); } catch (e) { console.error('保存失败:', e.message); }
+}
+
+function stripQuotes(text) {
+  if (!text) return text;
+  let t = text.trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1);
+  return t;
+}
+
+function ask(rl, question) {
+  return new Promise(resolve => rl.question(question, answer => resolve(answer.trim())));
+}
+
+function printHelp() {
+  console.log(`
+  🌳 ODDM 认知树 CLI v0.2.0
+  ─────────────────────────────────
+  【快速通道】
+    note "内容"          存一条笔记（实节点，默认业主干）
+    idea "内容"          存一个想法（虚节点，思主干）
+    parse "内容"         AI 解析对话/笔记为知识节点
+
+  【查看】
+    list                 显示完整认知树
+    view <id>            查看节点详情（含完整原文）
+    inspect              系统自省快照
+
+  【热力操作】
+    touch <id>           增加节点热力（注意力上升）
+    decay                全局衰减（时间流逝）
+
+  【认知结晶】
+    crystal              查看可结晶节点并提议归纳
+    crystallize <id> "高阶表述"  执行结晶
+
+  【跨干启发】
+    cross                自动发现跨干关联
+    inspire "瓶颈描述"   AI 跨界启发（基于跨干经验）
+
+  【主动扩展】
+    grow [N]             AI 主动扩展学习（空白检测+虚叶引力+高热力延伸）
+
+  【数据】
+    seed <name>          导入种子数据（如: oddm-knowledge）
+    export-md [file]     导出完整 Markdown 文档
+    export-html [file]   导出 H5 SVG 页面
+    clear                清空所有数据
+
+  【其他】
+    help                 显示帮助
+    exit                 退出
+  `);
+}
+
+function cmdList() { console.log(tree.renderASCII()); }
+
+function cmdView(id) {
+  const node = tree.getNode(id);
+  if (!node) { console.log('节点不存在:', id); return; }
+  console.log('═══════════════════════════════════════');
+  console.log(`  ID:     ${node.node_id}`);
+  console.log(`  主干:   ${node.axis} | 状态: ${node.state} | 层级: L${node.level}`);
+  console.log(`  热力:   ${node.heat_score.toFixed(1)}`);
+  console.log(`  主旨:   ${node.summary}`);
+  console.log(`  显性:   ${node.explicit_tags.join(', ') || '(无)'}`);
+  console.log(`  隐性:   ${node.implicit_tags.join(', ') || '(无)'}`);
+  console.log(`  跨干:   ${node.cross_links.join(', ') || '(无)'}`);
+  if (node.raw_source) { console.log('  ─── 完整原文 ───'); console.log(`  ${node.raw_source}`); }
+  console.log('═══════════════════════════════════════');
+}
+
+function cmdTouch(id) { const n = tree.touchNode(id); if (n) { console.log(`热力+ → ${n.heat_score.toFixed(1)}`); saveData(); } else console.log('节点不存在'); }
+
+function cmdDecay() { tree.decayAll(); console.log('全局衰减完成'); saveData(); }
+
+function cmdAdd(args) {
+  if (args.length < 3) { console.log('用法: add <生|业|思> <虚|实> "主旨" [隐性标签...]'); return; }
+  const [axis, state, summary, ...tags] = args;
+  if (!['生', '业', '思'].includes(axis)) { console.log('主干必须是 生/业/思'); return; }
+  if (!['虚', '实'].includes(state)) { console.log('状态必须是 虚/实'); return; }
+  const id = 'node_' + Date.now().toString(36);
+  const node = new KnowledgeNode({ node_id: id, axis, state, summary: stripQuotes(summary), implicit_tags: tags });
+  tree.addNode(node); tree.discoverCrossLinks(); saveData();
+  console.log(`已添加: ${id} [${axis}/${state}] ${node.summary}`);
+}
+
+function cmdNote(content) {
+  if (!content) { console.log('用法: note "内容"'); return; }
+  const node = tree.addNote(stripQuotes(content)); saveData();
+  console.log(`笔记已存: ${node.node_id} [业/实] ${node.summary}`);
+}
+
+function cmdIdea(content) {
+  if (!content) { console.log('用法: idea "内容"'); return; }
+  const node = tree.addIdea(stripQuotes(content)); saveData();
+  console.log(`想法已存: ${node.node_id} [思/虚] ${node.summary}`);
+}
+
+async function cmdParse(rl, content) {
+  if (!content) { console.log('用法: parse "对话或笔记内容"'); return; }
+  const raw = stripQuotes(content);
+  console.log('正在调用 AI 解析...');
+  const result = await parser.parse(raw);
+  if (!result.ok) { console.log('解析失败:', result.error); return; }
+  const d = result.data;
+  console.log('\n  AI 解析结果:');
+  console.log(`  主干: ${d.axis} | 状态: ${d.state}`);
+  console.log(`  主旨: ${d.summary}`);
+  console.log(`  显性: ${d.explicit_tags.join(', ') || '(无)'}`);
+  console.log(`  隐性: ${d.implicit_tags.join(', ') || '(无)'}`);
+  const ans = await ask(rl, '\n  确认写入? [Y/n] ');
+  if (ans.toLowerCase() === 'n') { console.log('已取消'); return; }
+  const node = tree.addFromAI(d, raw); saveData();
+  console.log(`\n  已写入: ${node.node_id} [${node.axis}/${node.state}] ${node.summary}`);
+  if (process.env.AUTO_CRYSTALLIZE_PROPOSE === '1') {
+    const candidates = tree.suggestCrystallization(3);
+    if (candidates.length > 0) {
+      console.log(`\n  💡 检测到 ${candidates.length} 个可结晶节点，运行 crystal 查看详情`);
     }
-  } catch (e) {
-    console.error('加载失败，使用示例数据:', e.message);
   }
-  return false;
 }
 
-function seedDemoData() {
-  tree.addNode(new KnowledgeNode({
-    node_id: 'work_oddm', axis: '业', state: '实',
-    summary: 'ODDM框架无图数据库设计',
-    explicit_tags: ['ODDM', '数据库'], implicit_tags: ['解耦', '边界'],
-    heat_score: 2.5, level: 2, children_ids: ['work_oddm_path', 'work_oddm_ref'],
-  }));
-  tree.addNode(new KnowledgeNode({ node_id: 'work_oddm_path', axis: '业', state: '实', summary: 'ODL路径寻址即拓扑', implicit_tags: ['解耦'], heat_score: 1.8 }));
-  tree.addNode(new KnowledgeNode({ node_id: 'work_oddm_ref', axis: '业', state: '实', summary: 'ref懒引用按需加载', implicit_tags: ['解耦', '惰性'], heat_score: 1.5 }));
-  tree.addNode(new KnowledgeNode({ node_id: 'life_sleep', axis: '生', state: '实', summary: '作息调理与褪黑素影响', implicit_tags: ['生理节律', '复利'], heat_score: 1.2 }));
-  tree.addNode(new KnowledgeNode({ node_id: 'life_family', axis: '生', state: '实', summary: '家庭分工明确减少内耗', implicit_tags: ['解耦', '边界'], heat_score: 0.9 }));
-  tree.addNode(new KnowledgeNode({
-    node_id: 'thought_tree', axis: '思', state: '虚',
-    summary: 'AI自增长个人知识库构想',
-    explicit_tags: ['AI', '知识库'], implicit_tags: ['自组织', '涌现'],
-    heat_score: 2.0, children_ids: ['thought_axis', 'thought_heat', 'thought_crystal'],
-  }));
-  tree.addNode(new KnowledgeNode({ node_id: 'thought_axis', axis: '思', state: '虚', summary: '生业思三主干模型', implicit_tags: ['极简'], heat_score: 1.6 }));
-  tree.addNode(new KnowledgeNode({ node_id: 'thought_heat', axis: '思', state: '虚', summary: '热力驱动应季显隐', implicit_tags: ['自组织'], heat_score: 1.4 }));
-  tree.addNode(new KnowledgeNode({ node_id: 'thought_crystal', axis: '思', state: '虚', summary: '认知结晶升维第一性原理', implicit_tags: ['涌现', '极简'], heat_score: 1.3 }));
-  tree.discoverCrossLinks();
+async function cmdCrystal(rl) {
+  const candidates = tree.suggestCrystallization(3);
+  if (candidates.length === 0) { console.log('当前没有可结晶的节点（需要 level≤1 且 ≥3 个子节点）'); return; }
+  console.log(`\n  可结晶节点: ${candidates.length} 个`);
+  candidates.forEach((n, i) => {
+    const children = tree.getChildren(n.node_id);
+    console.log(`  ${i + 1}. ${n.node_id} [${n.axis}/${n.state}] ${n.summary} (${children.length}子节点)`);
+    children.forEach(c => console.log(`     └ ${c.summary}`));
+  });
+  const idx = await ask(rl, '\n  选择结晶哪个? (输入序号，回车跳过) ');
+  const num = parseInt(idx);
+  if (!num || num < 1 || num > candidates.length) { console.log('已跳过'); return; }
+  const target = candidates[num - 1];
+  const children = tree.getChildren(target.node_id);
+  let highSummary = '';
+  if (parser.apiKey) {
+    console.log('  正在调用 AI 生成高阶表述...');
+    const cr = await parser.summarizeForCrystallization(children);
+    if (cr.ok) {
+      console.log(`  AI 提议: ${cr.summary}`);
+      const choice = await ask(rl, '  [y=用AI表述 / n=跳过 / m=手动输入] ');
+      if (choice.toLowerCase() === 'y') highSummary = cr.summary;
+      else if (choice.toLowerCase() === 'm') highSummary = await ask(rl, '  输入高阶表述: ');
+      else { console.log('已跳过'); return; }
+    } else {
+      console.log(`  AI 归纳失败: ${cr.error}`);
+      highSummary = await ask(rl, '  手动输入高阶表述: ');
+    }
+  } else {
+    highSummary = await ask(rl, '  输入高阶表述（结晶后的第一性原理）: ');
+  }
+  if (!highSummary.trim()) { console.log('已取消'); return; }
+  const result = tree.crystallize(target.node_id, highSummary.trim());
+  if (result) { saveData(); console.log(`\n  ✨ 结晶完成! ${result.node_id} → L${result.level}: ${result.summary}`); }
+}
+
+function cmdCrystallize(args) {
+  if (args.length < 2) { console.log('用法: crystallize <id> "高阶表述"'); return; }
+  const [id, ...summaryParts] = args;
+  const summary = stripQuotes(summaryParts.join(' '));
+  const result = tree.crystallize(id, summary);
+  if (result) { saveData(); console.log(`结晶完成: ${result.node_id} → L${result.level}`); }
+  else console.log('结晶失败（节点不存在或不满足条件）');
+}
+
+function cmdCross() {
+  const linked = tree.discoverCrossLinks(); saveData();
+  console.log(`发现 ${linked.length} 个节点有跨干关联`);
+  linked.forEach(n => console.log(`  ${n.node_id} [${n.axis}] ↔ ${n.cross_links.join(', ')}`));
+}
+
+async function cmdInspire(rl, bottleneck) {
+  if (!bottleneck) { console.log('用法: inspire "瓶颈描述"'); return; }
+  const raw = stripQuotes(bottleneck);
+  console.log('正在解析瓶颈...');
+  const parsed = await parser.parse(raw);
+  if (!parsed.ok) { console.log('瓶颈解析失败:', parsed.error); return; }
+  const tags = parsed.data.implicit_tags;
+  if (tags.length === 0) { console.log('瓶颈未提取到隐性标签，无法跨界启发'); return; }
+  console.log(`  瓶颈标签: ${tags.join(', ')}`);
+  const crossNodes = tree.findCrossNodesByTags(tags, parsed.data.axis, 5);
+  if (crossNodes.length === 0) { console.log('其他主干中没有同标签的经验节点'); return; }
+  console.log(`  找到 ${crossNodes.length} 个跨干相关节点:`);
+  crossNodes.forEach(n => console.log(`    [${n.axis}/${n.state}] ${n.summary}`));
+  console.log('正在生成跨界启发...');
+  const result = await parser.inspire(raw, crossNodes);
+  if (!result.ok) { console.log('启发生成失败:', result.error); return; }
+  console.log(`\n  💡 跨界启发: ${result.insight}`);
+  if (result.implicit_tags.length > 0) console.log(`  底层标签: ${result.implicit_tags.join(', ')}`);
+  const save = await ask(rl, '\n  存为思主干虚节点? [y/N] ');
+  if (save.toLowerCase() === 'y') {
+    const node = tree.addIdea(result.insight, result.implicit_tags); saveData();
+    console.log(`  已存: ${node.node_id} [思/虚] ${node.summary}`);
+  }
+}
+
+async function cmdGrow(rl, nStr) {
+  const n = parseInt(nStr) || 3;
+  console.log('\n  🌱 AI 主动扩展学习');
+  console.log('  ─────────────────────');
+
+  // 子能力2: 知识空白检测
+  const islands = tree.findKnowledgeIslands();
+  if (islands.length > 0) {
+    console.log(`\n  🔍 知识空白检测: 发现 ${islands.length} 个知识孤岛标签`);
+    islands.slice(0, 10).forEach(t => console.log(`     - ${t}（只有1个节点，建议补充）`));
+  } else {
+    console.log('\n  🔍 知识空白检测: 无明显孤岛');
+  }
+
+  // 子能力3: 虚叶引力
+  const noSupport = tree.findVirtualLeavesWithoutSupport();
+  if (noSupport.length > 0) {
+    console.log(`\n  🍃 无支撑虚节点: ${noSupport.length} 个（没有同标签实节点）`);
+    noSupport.slice(0, 5).forEach(n => console.log(`     - ${n.node_id}: ${n.summary}`));
+  }
+  const attracted = tree.attractVirtualLeaves();
+  if (attracted.length > 0) {
+    saveData();
+    console.log(`  🔗 虚叶引力: 为 ${attracted.length} 个虚节点建立了跨干关联`);
+  }
+
+  // 子能力1: 高热力延伸
+  const topNodes = tree.getTopHeatNodes(n);
+  if (topNodes.length === 0) { console.log('\n  树为空，无法延伸'); return; }
+  console.log(`\n  🔥 高热力节点 Top ${topNodes.length}:`);
+  topNodes.forEach((node, i) => console.log(`     ${i + 1}. [${node.axis}/${node.state}] ${node.summary} (热力${node.heat_score.toFixed(1)})`));
+
+  for (const node of topNodes) {
+    console.log(`\n  ── 延伸: ${node.summary} ──`);
+    console.log('  正在生成延伸点...');
+    const result = await parser.growExtension(node);
+    if (!result.ok) { console.log(`  延伸失败: ${result.error}`); continue; }
+    result.extensions.forEach((ext, i) => {
+      console.log(`     ${i + 1}. ${ext.summary} [${ext.implicit_tags.join(',')}]`);
+    });
+    const choice = await ask(rl, '  存入哪个? (序号，多个用逗号，回车跳过) ');
+    if (!choice.trim()) continue;
+    const indices = choice.split(',').map(s => parseInt(s.trim())).filter(i => i >= 1 && i <= result.extensions.length);
+    for (const idx of indices) {
+      const ext = result.extensions[idx - 1];
+      const newNode = tree.addIdea(ext.summary, ext.implicit_tags);
+      newNode.addCrossLink(node.node_id);
+      node.addCrossLink(newNode.node_id);
+      saveData();
+      console.log(`     ✅ 已存: ${newNode.node_id} [思/虚] ${newNode.summary}`);
+    }
+  }
+  console.log('\n  🌱 主动扩展学习完成');
+}
+
+function cmdSeed(name) {
+  if (!name) { console.log('用法: seed <name>（可用: oddm-knowledge）'); return; }
+  const file = path.join(SEED_DIR, `${name}.json`);
+  if (!fs.existsSync(file)) { console.log('种子文件不存在:', file); return; }
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    let count = 0;
+    for (const item of data) { if (!tree.getNode(item.node_id)) { tree.addNode(new KnowledgeNode(item)); count++; } }
+    tree.discoverCrossLinks(); saveData();
+    console.log(`导入 ${count} 个节点（跳过 ${data.length - count} 个已存在）`);
+  } catch (e) { console.log('导入失败:', e.message); }
+}
+
+function cmdExportMd(file) {
+  const out = file || 'cognitive-tree-export.md';
+  const lines = ['# ODDM 认知树导出', '', `导出时间: ${new Date().toISOString()}`, `节点总数: ${tree.nodes.size}`, ''];
+  for (const axis of ['生', '业', '思']) {
+    const nodes = tree.getByAxis(axis);
+    if (nodes.length === 0) continue;
+    lines.push(`## 【${axis}】`, '');
+    const allChildIds = new Set();
+    for (const n of nodes) for (const cid of n.children_ids) if (nodes.find(x => x.node_id === cid)) allChildIds.add(cid);
+    const roots = nodes.filter(n => !allChildIds.has(n.node_id));
+    const render = (node, depth) => {
+      const prefix = '#'.repeat(Math.min(depth + 3, 6));
+      lines.push(`${prefix} [${node.state}] ${node.summary}`);
+      lines.push(`- 热力: ${node.heat_score.toFixed(1)} | 层级: L${node.level} | ID: ${node.node_id}`);
+      if (node.implicit_tags.length) lines.push(`- 隐性标签: ${node.implicit_tags.join(', ')}`);
+      if (node.raw_source) lines.push(`- 原文: ${node.raw_source}`);
+      lines.push('');
+      const children = node.children_ids.map(id => tree.getNode(id)).filter(n => n && n.axis === axis);
+      children.forEach(c => render(c, depth + 1));
+    };
+    roots.forEach(r => render(r, 0));
+  }
+  fs.writeFileSync(out, lines.join('\n'), 'utf8');
+  console.log('已导出:', out);
+}
+
+function cmdExportHtml(file) {
+  const out = file || 'cognitive-tree.html';
+  const dataJson = JSON.stringify(tree.toJSON());
+  const html = generateHtmlPage(dataJson);
+  fs.writeFileSync(out, html, 'utf8');
+  console.log('已导出 H5 页面:', out);
 }
 
 function generateHtmlPage(dataJson) {
   return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🌳 ODDM 认知树</title>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ODDM 认知树</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f5f5f0;color:#333;min-height:100vh}
-.header{text-align:center;padding:24px 16px 8px}
-.header h1{font-size:24px;color:#2d5a27}
-.header .stats{font-size:14px;color:#888;margin-top:8px}
-.tree-scroll{overflow:auto;padding:20px}
-svg{display:block;margin:0 auto}
-.node-card{cursor:pointer;transition:filter .15s}
-.node-card:hover{filter:brightness(0.96)}
-.node-text{font-size:13px;fill:#222;pointer-events:none}
-.node-sub{font-size:11px;fill:#999;pointer-events:none}
-.axis-title{font-size:18px;font-weight:bold;fill:#2d5a27;text-anchor:middle}
-.link{stroke:#bbb;stroke-width:1.5;fill:none}
-.cross-link{stroke:#c9a0dc;stroke-width:1;stroke-dasharray:5,4;fill:none;opacity:.4}
-.tooltip{position:fixed;background:#fff;border:1px solid #ddd;border-radius:10px;padding:14px 18px;font-size:13px;max-width:320px;pointer-events:none;z-index:100;display:none;box-shadow:0 4px 24px rgba(0,0,0,.12);line-height:1.6}
-.tooltip .t-title{font-weight:bold;color:#2d5a27;margin-bottom:8px;font-size:15px}
-.tooltip .t-row{margin:3px 0;color:#555}
-.tooltip .t-content{margin-top:10px;padding-top:10px;border-top:1px solid #eee;color:#666}
-.legend{text-align:center;padding:12px;font-size:12px;color:#888}
-.legend span{margin:0 16px}
-</style>
-</head>
-<body>
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f5f0;color:#333;overflow:auto}
+.header{padding:20px;text-align:center;background:#fff;border-bottom:1px solid #e0e0d0}
+.header h1{font-size:24px;color:#2c5f2d}
+.header .stats{margin-top:8px;font-size:13px;color:#888}
+.tree-container{padding:20px;min-height:calc(100vh - 80px)}
+svg{width:100%;height:auto;display:block}
+.node-card{cursor:pointer;transition:all .2s}
+.node-card:hover{filter:brightness(1.1)}
+.node-text{font-size:13px;fill:#333;pointer-events:none}
+.node-tag{font-size:10px;fill:#999;pointer-events:none}
+.axis-label{font-size:16px;font-weight:bold;fill:#2c5f2d}
+.tooltip{position:fixed;background:#fff;border:1px solid #ddd;border-radius:6px;padding:12px;max-width:300px;box-shadow:0 4px 12px rgba(0,0,0,.15);pointer-events:none;display:none;z-index:100;font-size:13px;line-height:1.6}
+</style></head><body>
 <div class="header"><h1>🌳 ODDM 认知树</h1><div class="stats" id="stats"></div></div>
-<div class="tree-scroll"><svg id="tree"></svg></div>
-<div class="legend"><span>● 实叶（已验证）</span><span>○ 虚叶（构想）</span><span>─ 父子连接</span><span style="color:#c9a0dc">┄ 跨干关联</span></div>
+<div class="tree-container"><svg id="tree"></svg></div>
 <div class="tooltip" id="tooltip"></div>
 <script>
 const DATA=${dataJson};
-const svg=document.getElementById('tree');
-const tooltip=document.getElementById('tooltip');
-const nodeMap={};DATA.forEach(n=>nodeMap[n.node_id]=n);
-const NODE_W=190,NODE_H=52,VGAP=60,HGAP=24,TOP_PAD=50,LEFT_PAD=30;
-const axes=['生','业','思'];
-const axisColor={'生':'#52b788','业':'#4ea8de','思':'#cdb4db'};
-const axisTrees={};
-for(const a of axes){
-  const nodes=DATA.filter(n=>n.axis===a);
-  const childIds=new Set();
-  nodes.forEach(n=>n.children_ids.forEach(cid=>{if(nodes.find(x=>x.node_id===cid))childIds.add(cid);}));
+const AXES=['生','业','思'];
+const AXIS_COLORS={'生':'#4a90d9','业':'#2c5f2d','思':'#8b5cf6'};
+const STATE_FILL={'实':'#fff','虚':'none'};
+const STATE_STROKE={'实':'#333','虚':'#999'};
+
+function buildTree(axis){
+  const nodes=DATA.filter(n=>n.axis===axis);
+  const childIds=new Set(nodes.flatMap(n=>n.children_ids));
   const roots=nodes.filter(n=>!childIds.has(n.node_id));
-  axisTrees[a]={nodes,roots};
+  const map={};
+  nodes.forEach(n=>map[n.node_id]=n);
+  function build(id){const n=map[id];if(!n)return null;return{...n,children:(n.children_ids||[]).map(cid=>build(cid)).filter(Boolean)};}
+  return roots.map(r=>build(r.node_id));
 }
-function treeWidth(node){
-  const children=(node.children_ids||[]).map(id=>nodeMap[id]).filter(n=>n&&n.axis===node.axis);
-  if(children.length===0)return 1;
-  return children.reduce((s,c)=>s+treeWidth(c),0);
-}
-const positions={};
-function layout(node,x,depth){
-  const y=TOP_PAD+depth*(NODE_H+VGAP);
-  positions[node.node_id]={x,y,node};
-  const children=(node.children_ids||[]).map(id=>nodeMap[id]).filter(n=>n&&n.axis===node.axis);
-  if(children.length>0){
-    let curX=x;
-    children.forEach(c=>{const w=treeWidth(c);layout(c,curX,depth+1);curX+=w*(NODE_W+HGAP);});
+
+function layoutTree(roots,x,y,vgap,hgap){
+  const positions=[];
+  let curY=y;
+  function walk(node,depth){
+    const px=x+depth*hgap;
+    const py=curY;
+    positions.push({...node,x:px,y:py});
+    curY+=vgap;
+    if(node.children&&node.children.length){node.children.forEach(c=>walk(c,depth+1));}
   }
+  roots.forEach(r=>walk(r,0));
+  return positions;
 }
-let curX=LEFT_PAD;
-const axisStart={};
-for(const a of axes){
-  const {roots}=axisTrees[a];
-  let totalW=0;
-  roots.forEach(r=>totalW+=treeWidth(r)*(NODE_W+HGAP));
-  if(totalW>0){axisStart[a]=curX;roots.forEach(r=>{const w=treeWidth(r)*(NODE_W+HGAP);layout(r,curX,0);curX+=w;});curX+=HGAP*2;}
-}
-let maxX=0,maxY=0;
-Object.values(positions).forEach(p=>{maxX=Math.max(maxX,p.x+NODE_W);maxY=Math.max(maxY,p.y+NODE_H);});
-const SVG_W=Math.max(maxX+LEFT_PAD,800);
-const SVG_H=maxY+80;
-svg.setAttribute('width',SVG_W);svg.setAttribute('height',SVG_H);
-for(const a of axes){
-  if(axisStart[a]!==undefined){
-    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('x',axisStart[a]+40);t.setAttribute('y',28);t.setAttribute('class','axis-title');
-    t.textContent='【'+a+'】';svg.appendChild(t);
-  }
-}
-DATA.forEach(n=>{
-  if(!positions[n.node_id])return;
-  const p1=positions[n.node_id];
-  (n.children_ids||[]).forEach(cid=>{
-    if(positions[cid]){
-      const p2=positions[cid];
-      const x1=p1.x+NODE_W/2,y1=p1.y+NODE_H,x2=p2.x+NODE_W/2,y2=p2.y,my=(y1+y2)/2;
-      const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',\`M\${x1},\${y1} C\${x1},\${my} \${x2},\${my} \${x2},\${y2}\`);
-      path.setAttribute('class','link');svg.appendChild(path);
-    }
+
+function render(){
+  const svg=document.getElementById('tree');
+  const tooltip=document.getElementById('tooltip');
+  let allPositions=[];
+  let offsetY=0;
+  const vgap=70,hgap=220;
+  AXES.forEach(axis=>{
+    const roots=buildTree(axis);
+    const positions=layoutTree(roots,60,offsetY+40,vgap,hgap);
+    allPositions=allPositions.concat(positions.map(p=>({...p,axis})));
+    offsetY+=Math.max(positions.length,1)*vgap+60;
   });
-});
-const drawnCross=new Set();
-DATA.forEach(n=>{
-  (n.cross_links||[]).forEach(tid=>{
-    const key=[n.node_id,tid].sort().join('-');
-    if(drawnCross.has(key))return;
-    drawnCross.add(key);
-    if(positions[n.node_id]&&positions[tid]){
-      const p1=positions[n.node_id],p2=positions[tid];
-      const x1=p1.x+NODE_W/2,y1=p1.y+NODE_H/2,x2=p2.x+NODE_W/2,y2=p2.y+NODE_H/2,mx=(x1+x2)/2,my=(y1+y2)/2-40;
-      const path=document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d',\`M\${x1},\${y1} Q\${mx},\${my} \${x2},\${y2}\`);
-      path.setAttribute('class','cross-link');svg.appendChild(path);
-    }
+  const maxX=Math.max(...allPositions.map(p=>p.x))+240;
+  const maxY=offsetY+40;
+  svg.setAttribute('viewBox',\`0 0 \${maxX} \${maxY}\`);
+  svg.setAttribute('width',maxX);
+  svg.setAttribute('height',maxY);
+  let html='';
+  AXES.forEach((axis,i)=>{
+    const y=60+i*(Math.ceil(DATA.filter(n=>n.axis===axis).length/1)*vgap+60);
   });
-});
-Object.values(positions).forEach(({x,y,node})=>{
-  const g=document.createElementNS('http://www.w3.org/2000/svg','g');
-  g.setAttribute('class','node-card');
-  const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
-  rect.setAttribute('x',x);rect.setAttribute('y',y);rect.setAttribute('width',NODE_W);rect.setAttribute('height',NODE_H);
-  rect.setAttribute('rx',8);rect.setAttribute('ry',8);rect.setAttribute('fill','#fff');
-  const color=axisColor[node.axis]||'#999';
-  if(node.state==='实'){rect.setAttribute('stroke',color);rect.setAttribute('stroke-width','2');}
-  else{rect.setAttribute('stroke',color);rect.setAttribute('stroke-width','1.5');rect.setAttribute('stroke-dasharray','4,3');}
-  g.appendChild(rect);
-  const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
-  dot.setAttribute('cx',x+14);dot.setAttribute('cy',y+18);dot.setAttribute('r',4);
-  dot.setAttribute('fill',node.state==='实'?color:'none');dot.setAttribute('stroke',color);dot.setAttribute('stroke-width','1.5');
-  g.appendChild(dot);
-  const title=document.createElementNS('http://www.w3.org/2000/svg','text');
-  title.setAttribute('x',x+26);title.setAttribute('y',y+22);title.setAttribute('class','node-text');
-  title.textContent=node.summary.length>16?node.summary.slice(0,16)+'..':node.summary;
-  g.appendChild(title);
-  const tags=(node.implicit_tags||[]).slice(0,2).join('·');
-  const heat='🔥'.repeat(Math.min(3,Math.ceil(node.heat_score)));
-  const sub=document.createElementNS('http://www.w3.org/2000/svg','text');
-  sub.setAttribute('x',x+10);sub.setAttribute('y',y+40);sub.setAttribute('class','node-sub');
-  sub.textContent=(tags?tags+' ':'')+heat+(node.level>1?' L'+node.level:'');
-  g.appendChild(sub);
-  g.addEventListener('mouseenter',e=>showTooltip(e,node));
-  g.addEventListener('mousemove',e=>moveTooltip(e));
-  g.addEventListener('mouseleave',hideTooltip);
-  svg.appendChild(g);
-});
-const real=DATA.filter(n=>n.state==='实').length;
-const virt=DATA.filter(n=>n.state==='虚').length;
-const cross=DATA.filter(n=>(n.cross_links||[]).length>0).length;
-document.getElementById('stats').textContent=\`节点 \${DATA.length} | 实 \${real} 虚 \${virt} | 跨干关联 \${cross}\`;
-function showTooltip(e,node){
-  tooltip.style.display='block';
-  tooltip.innerHTML=\`<div class="t-title">\${node.summary}</div>
-  <div class="t-row">主干: \${node.axis} | 状态: \${node.state} | 层级: L\${node.level}</div>
-  <div class="t-row">热力: \${node.heat_score.toFixed(1)}</div>
-  \${node.implicit_tags&&node.implicit_tags.length?'<div class="t-row">隐性标签: '+node.implicit_tags.join(', ')+'</div>':''}
-  \${node.explicit_tags&&node.explicit_tags.length?'<div class="t-row">显性标签: '+node.explicit_tags.join(', ')+'</div>':''}
-  \${node.raw_source?'<div class="t-content">'+node.raw_source+'</div>':''}\`;
-  moveTooltip(e);
-}
-function moveTooltip(e){tooltip.style.left=(e.clientX+15)+'px';tooltip.style.top=(e.clientY+15)+'px';}
-function hideTooltip(){tooltip.style.display='none';}
-</script>
-</body>
-</html>`;
-}
-
-const commands = {
-  help() {
-    console.log(`
-  可用命令:
-    note "内容"   快速存笔记（实节点，默认业主干）
-    note 生 "内容"  指定主干存笔记
-    idea "内容"   快速存想法（虚节点，思主干）
-    list          渲染认知树（干支叶层级）
-    view <id>     查看节点完整内容（含原文）
-    add           添加新节点（交互式完整字段）
-    touch <id>    注意某个节点（热力+）
-    decay         全树自然衰减（模拟时间流逝）
-    crystal       查看结晶提议（配置ARK_API_KEY后AI自动生成高阶表述）
-    crystallize <id> <新表述>  执行结晶升维
-    cross         重新发现跨干关联
-    inspire "瓶颈描述"  AI跨界启发（基于其他主干同标签经验生成类比建议）
-    inspect       全树自省快照（JSON摘要）
-    seed [名称]   导入种子知识库（默认 oddm-knowledge，33个ODDM知识点）
-    parse "内容"  AI 解析对话/笔记为知识点（需配置 ARK_API_KEY 环境变量）
-    export-md [文件名]  导出为 Markdown 文件
-    export-html [文件名] 导出为 H5 SVG 页面（浏览器打开查看）
-    clear         清屏
-    help          显示此帮助
-    exit          退出
-`);
-  },
-
-  list() { console.log(tree.renderASCII()); },
-
-  view(id) {
-    if (!id) { console.log('用法: view <node_id>'); return; }
-    const node = tree.getNode(id);
-    if (!node) { console.log('❌ 节点不存在'); return; }
-    console.log('─────────────────────────────────────────');
-    console.log(`📌 ${node.summary}`);
-    console.log('─────────────────────────────────────────');
-    console.log(`  ID:     ${node.node_id}`);
-    console.log(`  主干:   ${node.axis} | 状态: ${node.state} | 层级: L${node.level}`);
-    console.log(`  热力:   ${node.heat_score.toFixed(1)}`);
-    console.log(`  显标签: ${node.explicit_tags.join(', ') || '(无)'}`);
-    console.log(`  隐标签: ${node.implicit_tags.join(', ') || '(无)'}`);
-    console.log(`  子节点: ${node.children_ids.join(', ') || '(无)'}`);
-    console.log(`  跨干:   ${node.cross_links.join(', ') || '(无)'}`);
-    console.log('─────────────────────────────────────────');
-    console.log(`  📄 完整内容:`);
-    console.log(`  ${node.raw_source || node.summary}`);
-    console.log('─────────────────────────────────────────');
-  },
-
-  note(axisOrContent, ...rest) {
-    let axis = '业';
-    let content;
-    if (['生', '业', '思'].includes(axisOrContent)) {
-      axis = axisOrContent;
-      content = rest.join(' ');
-    } else {
-      content = [axisOrContent, ...rest].join(' ');
-    }
-    if (!content || !content.trim()) { console.log('用法: note "内容" 或 note 生 "内容"'); return; }
-    const node = tree.addNote(stripQuotes(content), axis);
-    console.log(`📝 已存笔记 [${axis}/实]: ${node.summary} [${node.node_id}]`);
-    save();
-  },
-
-  idea(...args) {
-    const content = args.join(' ');
-    if (!content || !content.trim()) { console.log('用法: idea "内容"'); return; }
-    const node = tree.addIdea(stripQuotes(content));
-    console.log(`💡 已存想法 [思/虚]: ${node.summary} [${node.node_id}]`);
-    save();
-  },
-
-  async add(rl) {
-    const axis = await ask(rl, '主干 (生/业/思): ');
-    const state = await ask(rl, '状态 (虚/实): ');
-    const summary = await ask(rl, '主旨: ');
-    const implicit = await ask(rl, '隐性标签 (逗号分隔, 可空): ');
-    const id = 'node_' + Date.now().toString(36);
-    try {
-      const node = new KnowledgeNode({
-        node_id: id, axis, state, summary,
-        implicit_tags: implicit ? implicit.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [],
+  let axisY=20;
+  AXES.forEach(axis=>{
+    const count=DATA.filter(n=>n.axis===axis).length;
+    html+='<text class="axis-label" x="20" y="'+(axisY+20)+'" fill="'+AXIS_COLORS[axis]+'">【'+axis+'】'+count+'节点</text>';
+    axisY+=Math.max(count,1)*vgap+60;
+  });
+  allPositions.forEach(p=>{
+    if(p.children&&p.children.length){
+      p.children.forEach(c=>{
+        const child=allPositions.find(q=>q.node_id===c.node_id);
+        if(child){
+          const x1=p.x+190,y1=p.y+26,x2=child.x,y2=child.y+26;
+          const my=(y1+y2)/2;
+          html+='<path d="M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2+'" fill="none" stroke="#ccc" stroke-width="1.5"/>';
+        }
       });
-      tree.addNode(node);
-      tree.discoverCrossLinks();
-      console.log(`✅ 已添加: ${id}`);
-      save();
-    } catch (e) { console.log(`❌ ${e.message}`); }
-  },
-
-  touch(id) {
-    if (!id) { console.log('用法: touch <node_id>'); return; }
-    const node = tree.touchNode(id);
-    if (node) { console.log(`👆 注意了 "${node.summary}"，热力 → ${node.heat_score.toFixed(1)}`); save(); }
-    else { console.log('❌ 节点不存在'); }
-  },
-
-  decay() { tree.decayAll(); console.log('🍂 全树自然衰减（时间流逝）'); save(); },
-
-  async crystal(rl) {
-    const suggestions = tree.suggestCrystallization(3);
-    if (suggestions.length === 0) {
-      console.log('暂无满足结晶条件的节点（需要3个以上子节点的底层碎片）');
-      return;
     }
-    console.log('💎 结晶提议:');
-    const parser = new DoubaoParser();
-    const hasKey = parser.checkKey().ok;
-    for (const n of suggestions) {
-      const children = n.children_ids.map(id => tree.getNode(id)).filter(Boolean);
-      console.log(`  ${n.node_id}: "${n.summary}" (子节点: ${n.children_ids.length})`);
-      if (!hasKey) continue;
-      process.stdout.write('    🤖 AI 归纳中…\r');
-      const r = await parser.summarizeForCrystallization(children);
-      if (!r.ok) { console.log(`    ⚠️ AI归纳失败: ${r.error}（可用 crystallize 手动执行）`); continue; }
-      console.log(`    💡 AI 建议升维为: "${r.summary}"`);
-      const ans = await ask(rl, '    执行结晶？[y=用AI表述 / n=跳过 / m=手动输入] ');
-      const lower = ans.trim().toLowerCase();
-      if (lower === 'y') {
-        const c = tree.crystallize(n.node_id, r.summary);
-        if (c) { save(); console.log(`    ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
-      } else if (lower === 'm') {
-        const manual = await ask(rl, '    输入高阶原理表述: ');
-        if (manual.trim()) {
-          const c = tree.crystallize(n.node_id, manual.trim());
-          if (c) { save(); console.log(`    ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
-        }
-      }
-    }
-    if (!hasKey) { console.log('  💡 配置 ARK_API_KEY 后，crystal 可自动生成高阶表述提议'); }
-  },
-
-  crystallize(id, ...rest) {
-    if (!id || rest.length === 0) { console.log('用法: crystallize <node_id> <新的高阶原理表述>'); return; }
-    const newSummary = rest.join(' ');
-    const node = tree.crystallize(id, newSummary);
-    if (node) { console.log(`✨ 结晶完成: "${node.summary}" (层级 L${node.level})`); save(); }
-    else { console.log('❌ 不满足结晶条件或节点不存在'); }
-  },
-
-  cross() {
-    const linked = tree.discoverCrossLinks();
-    console.log(`🔗 发现 ${linked.length} 个有跨干关联的节点`);
-    linked.forEach(n => { console.log(`  ${n.node_id} (${n.axis}): ──> ${n.cross_links.join(', ')}`); });
-    save();
-  },
-
-  /**
-   * inspire 命令——功能三：AI 跨界启发
-   *
-   * 【四步流程】
-   *   1. AI 解析瓶颈描述，提取隐性标签（复用 parse 的 META_PROMPT）
-   *   2. findCrossNodesByTags 在其他主干中找同标签经验节点
-   *   3. AI 基于瓶颈+跨干节点生成跨界启发（INSPIRE_PROMPT）
-   *   4. 可选存为思主干虚节点（主权在人）
-   *
-   * @param {readline.Interface} rl - 交互式输入接口
-   * @param {string[]} args - 命令参数，第一个为瓶颈描述
-   */
-  async inspire(rl, ...args) {
-    const bottleneck = stripQuotes(args.join(' '));
-    if (!bottleneck.trim()) { console.log('用法: inspire "遇到的瓶颈或问题描述"'); return; }
-    const parser = new DoubaoParser();
-    const keyCheck = parser.checkKey();
-    if (!keyCheck.ok) { console.log(`❌ ${keyCheck.error}`); return; }
-
-    // 第一步：AI 解析瓶颈，提取隐性标签
-    console.log(`🤖 解析瓶颈中…`);
-    const parseResult = await parser.parse(bottleneck);
-    if (!parseResult.ok) { console.log(`❌ 瓶颈解析失败: ${parseResult.error}`); return; }
-    const tags = parseResult.data.implicit_tags;
-    const axis = parseResult.data.axis;
-    console.log(`  瓶颈主干: ${axis} | 隐性标签: ${tags.join(', ') || '(无)'}`);
-
-    if (tags.length === 0) {
-      console.log('⚠️ 瓶颈未提取到隐性标签，无法跨界启发。尝试更具体的描述。');
-      return;
-    }
-
-    // 第二步：在其他主干中找同标签经验节点
-    const crossNodes = tree.findCrossNodesByTags(tags, axis, 5);
-    if (crossNodes.length === 0) {
-      console.log(`⚠️ 其他主干中没有标签为 [${tags.join(', ')}] 的经验节点，暂无跨界素材。`);
-      console.log('  提示：先积累更多跨领域知识，跨界启发会更丰富。');
-      return;
-    }
-    console.log(`  找到 ${crossNodes.length} 个相关经验:`);
-    crossNodes.forEach(n => console.log(`    [${n.axis}/${n.state}] ${n.summary} 🔥${n.heat_score.toFixed(1)}`));
-
-    // 第三步：AI 生成跨界启发
-    console.log(`🤖 生成跨界启发中…`);
-    const inspireResult = await parser.inspire(bottleneck, crossNodes);
-    if (!inspireResult.ok) { console.log(`❌ 跨界启发失败: ${inspireResult.error}`); return; }
-    console.log('─────────────────────────────────────────');
-    console.log(`💡 跨界启发:`);
-    console.log(`  ${inspireResult.insight}`);
-    if (inspireResult.implicit_tags.length > 0) {
-      console.log(`  底层逻辑: ${inspireResult.implicit_tags.join(', ')}`);
-    }
-    console.log('─────────────────────────────────────────');
-
-    // 第四步：可选存为思主干虚节点
-    const ans = await ask(rl, '保存这条启发到认知树？[y=存为思主干虚节点 / n=放弃] ');
-    if (ans.trim().toLowerCase() === 'y') {
-      const node = tree.addIdea(inspireResult.insight, inspireResult.implicit_tags);
-      save();
-      console.log(`💡 已存为思主干虚节点: ${node.summary} [${node.node_id}]`);
-    }
-  },
-
-  inspect() {
-    const snap = tree.introspect();
-    console.log(JSON.stringify({
-      total: snap.total_nodes, by_axis: snap.by_axis, by_state: snap.by_state, cross_linked: snap.cross_link_count,
-    }, null, 2));
-  },
-
-  clear() { console.clear(); },
-
-  seed(name) {
-    const seedName = name || 'oddm-knowledge';
-    const seedFile = path.join(__dirname, '..', 'seed', `${seedName}.json`);
-    if (!fs.existsSync(seedFile)) { console.log(`❌ 找不到种子文件: ${seedFile}`); console.log('可用种子: oddm-knowledge'); return; }
-    try {
-      const data = JSON.parse(fs.readFileSync(seedFile, 'utf-8'));
-      tree = KnowledgeTree.fromJSON(data);
-      tree.discoverCrossLinks();
-      save();
-      console.log(`🌱 已导入种子数据: ${seedName} (${tree.nodes.size} 个节点)`);
-      console.log(tree.renderASCII());
-    } catch (e) { console.log(`❌ 导入失败: ${e.message}`); }
-  },
-
-  async parse(rl, ...args) {
-    const text = stripQuotes(args.join(' '));
-    if (!text.trim()) { console.log('用法: parse "对话或笔记内容"'); return; }
-    const parser = new DoubaoParser();
-    const keyCheck = parser.checkKey();
-    if (!keyCheck.ok) { console.log(`❌ ${keyCheck.error}`); return; }
-    const cfg = parser.getConfig();
-    console.log(`🤖 AI 解析中…（模型: ${cfg.model}，超时: ${cfg.timeoutSec}s）`);
-    const result = await parser.parse(text);
-    if (!result.ok) { console.log(`❌ ${result.error}`); return; }
-    const d = result.data;
-    console.log('─────────────────────────────────────────');
-    console.log('🧠 AI 解析结果（待确认，主权在你）');
-    console.log('─────────────────────────────────────────');
-    console.log(`  主干:   ${d.axis}`);
-    console.log(`  状态:   ${d.state}${d.state === '虚' ? '（待验证构想）' : '（已验证经验）'}`);
-    console.log(`  摘要:   ${d.summary}`);
-    console.log(`  显标签: ${d.explicit_tags.join(', ') || '(无)'}`);
-    console.log(`  隐标签: ${d.implicit_tags.join(', ') || '(无)'}`);
-    console.log('─────────────────────────────────────────');
-    const ans = await ask(rl, '写入认知树？[y=写入 / n=放弃 / e=修改后写入] ');
-    const lower = ans.trim().toLowerCase();
-    if (lower === 'y' || lower === 'e') {
-      if (lower === 'e') {
-        const axisAns = await ask(rl, `主干[${d.axis}]改为（生/业/思，回车不变）: `);
-        if (['生', '业', '思'].includes(axisAns.trim())) d.axis = axisAns.trim();
-        const stateAns = await ask(rl, `状态[${d.state}]改为（虚/实，回车不变）: `);
-        if (['虚', '实'].includes(stateAns.trim())) d.state = stateAns.trim();
-      }
-      const node = tree.addFromAI(d, text);
-      save();
-      console.log(`🌱 已写入 [${d.axis}/${d.state}]: ${node.summary} [${node.node_id}]`);
-      console.log('  输入 list 查看树；点击 touch 可提升热力');
-      if (process.env.AUTO_CRYSTALLIZE_PROPOSE === '1') {
-        const newCandidates = tree.suggestCrystallization(3);
-        if (newCandidates.length > 0) {
-          console.log('');
-          console.log('💎 写入后检测到可结晶节点，AI 正在归纳…');
-          for (const cand of newCandidates) {
-            const ch = cand.children_ids.map(id => tree.getNode(id)).filter(Boolean);
-            const cr = await parser.summarizeForCrystallization(ch);
-            if (!cr.ok) { console.log(`  ⚠️ ${cand.node_id} 归纳失败: ${cr.error}`); continue; }
-            console.log(`  ${cand.node_id}: "${cand.summary}" → 💡 "${cr.summary}"`);
-            const ans = await ask(rl, '  执行结晶？[y/n] ');
-            if (ans.trim().toLowerCase() === 'y') {
-              const c = tree.crystallize(cand.node_id, cr.summary);
-              if (c) { save(); console.log(`  ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
-            }
-          }
-        }
-      }
-    } else { console.log('已放弃，未写入。'); }
-  },
-
-  'export-md'(filename) {
-    const file = filename || 'cognitive-tree-export.md';
-    const lines = [];
-    const now = new Date().toISOString().slice(0, 10);
-    lines.push('# ODDM 认知树导出');
-    lines.push('');
-    lines.push(`> 导出时间: ${now}`);
-    lines.push(`> 节点总数: ${tree.nodes.size} | 实: ${tree._countByState('实')} 虚: ${tree._countByState('虚')}`);
-    lines.push('');
-    for (const axis of ['生', '业', '思']) {
-      const axisNodes = tree.getByAxis(axis);
-      if (axisNodes.length === 0) continue;
-      lines.push(`## ${axis}`);
-      lines.push('');
-      const childrenMap = new Map();
-      const allChildIds = new Set();
-      for (const n of axisNodes) {
-        const children = n.children_ids.map(id => tree.getNode(id)).filter(Boolean);
-        childrenMap.set(n.node_id, children);
-        for (const c of children) allChildIds.add(c.node_id);
-      }
-      const roots = axisNodes.filter(n => !allChildIds.has(n.node_id));
-      const renderMdNode = (node, depth) => {
-        const prefix = '#'.repeat(depth + 3);
-        const levelMark = node.level > 1 ? `[L${node.level}] ` : '';
-        const stateMark = node.state === '实' ? '●' : '○';
-        lines.push(`${prefix} ${stateMark} ${levelMark}${node.summary}`);
-        lines.push('');
-        lines.push(`- **状态**: ${node.state} | **热力**: ${node.heat_score.toFixed(1)} | **层级**: L${node.level}`);
-        if (node.explicit_tags.length) lines.push(`- **显性标签**: ${node.explicit_tags.join(', ')}`);
-        if (node.implicit_tags.length) lines.push(`- **隐性标签**: ${node.implicit_tags.join(', ')}`);
-        if (node.raw_source) lines.push(`- **完整内容**: ${node.raw_source}`);
-        if (node.cross_links.length) lines.push(`- **跨干关联**: ${node.cross_links.join(', ')}`);
-        lines.push(`- **ID**: ${node.node_id}`);
-        lines.push('');
-        const children = childrenMap.get(node.node_id) || [];
-        for (const child of children) { renderMdNode(child, depth + 1); }
-      };
-      for (const root of roots) { renderMdNode(root, 0); }
-    }
-    try { fs.writeFileSync(file, lines.join('\n'), 'utf-8'); console.log(`📄 已导出 Markdown: ${file}`); }
-    catch (e) { console.log(`❌ 导出失败: ${e.message}`); }
-  },
-
-  'export-html'(filename) {
-    const file = filename || 'cognitive-tree.html';
-    const data = JSON.stringify(tree.toJSON());
-    const html = generateHtmlPage(data);
-    try { fs.writeFileSync(file, html, 'utf-8'); console.log(`🌐 已导出 H5 页面: ${file}（浏览器打开即可查看 SVG 认知树）`); }
-    catch (e) { console.log(`❌ 导出失败: ${e.message}`); }
-  },
-};
-
-function ask(rl, question) {
-  return new Promise(resolve => rl.question(question, resolve));
+  });
+  allPositions.forEach(p=>{
+    const color=AXIS_COLORS[p.axis];
+    const isSolid=p.state==='实';
+    const heat=Math.min(p.heat_score,10);
+    const heatBars='🔥'.repeat(Math.min(3,Math.ceil(heat/2)));
+    const title=p.summary.length>16?p.summary.slice(0,16)+'…':p.summary;
+    const tags=(p.implicit_tags||[]).slice(0,2).join('·');
+    const dash=isSolid?'':'stroke-dasharray="4,3"';
+    html+='<g class="node-card" data-id="'+p.node_id+'">';
+    html+='<rect x="'+p.x+'" y="'+p.y+'" width="190" height="52" rx="6" fill="'+(isSolid?'#fff':'#fafafa')+'" stroke="'+color+'" stroke-width="2" '+dash+'/>';
+    html+='<circle cx="'+(p.x+14)+'" cy="'+(p.y+16)+'" r="5" fill="'+(isSolid?color:'none')+'" stroke="'+color+'" stroke-width="2"/>';
+    html+='<text class="node-text" x="'+(p.x+26)+'" y="'+(p.y+20)+'">'+title+'</text>';
+    html+='<text class="node-tag" x="'+(p.x+26)+'" y="'+(p.y+38)+'">'+(tags||'')+' '+heatBars+' L'+p.level+'</text>';
+    html+='</g>';
+  });
+  svg.innerHTML=html;
+  document.getElementById('stats').textContent='共 '+DATA.length+' 个节点 | 实:'+DATA.filter(n=>n.state==='实').length+' 虚:'+DATA.filter(n=>n.state==='虚').length;
+  svg.querySelectorAll('.node-card').forEach(card=>{
+    card.addEventListener('mouseenter',e=>{
+      const id=card.getAttribute('data-id');
+      const n=DATA.find(x=>x.node_id===id);
+      if(!n)return;
+      tooltip.innerHTML='<b>['+n.axis+'/'+n.state+'] '+n.summary+'</b><br>热力:'+n.heat_score.toFixed(1)+' | L'+n.level+'<br>隐性:'+(n.implicit_tags||[]).join(',')+'<br>'+(n.raw_source?'原文:'+n.raw_source:'');
+      tooltip.style.display='block';
+      tooltip.style.left=(e.clientX+10)+'px';
+      tooltip.style.top=(e.clientY+10)+'px';
+    });
+    card.addEventListener('mousemove',e=>{tooltip.style.left=(e.clientX+10)+'px';tooltip.style.top=(e.clientY+10)+'px';});
+    card.addEventListener('mouseleave',()=>{tooltip.style.display='none';});
+  });
+}
+render();
+</script></body></html>`;
 }
 
-function stripQuotes(s) {
-  if (typeof s !== 'string') return s;
-  const t = s.trim();
-  if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
-    return t.slice(1, -1).trim();
-  }
-  return t;
+function cmdInspect() {
+  const info = tree.introspect();
+  console.log(JSON.stringify({ total_nodes: info.total_nodes, by_axis: info.by_axis, by_state: info.by_state, cross_link_count: info.cross_link_count }, null, 2));
 }
 
-async function main() {
-  const loaded = load();
-  if (!loaded) { seedDemoData(); save(); }
-  console.clear();
-  console.log('🌳 ODDM 认知树 CLI');
-  console.log(`   数据文件: ${DATA_FILE}`);
-  console.log('   输入 help 查看命令\n');
-  console.log(tree.renderASCII());
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  rl.setPrompt('\nctree> ');
-  rl.prompt();
-  rl.on('line', async (line) => {
-    const parts = line.trim().split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1);
-    if (cmd === 'exit' || cmd === 'quit') {
-      console.log('👋 再见。认知树随内存消散，如露亦如电。');
-      rl.close();
-      return;
-    }
-    if (commands[cmd]) {
-      if (cmd === 'add' || cmd === 'parse' || cmd === 'crystal' || cmd === 'inspire') {
-        await commands[cmd](rl, ...args);
-      } else {
-        commands[cmd](...args);
-      }
-    } else if (cmd) {
-      console.log(`未知命令: ${cmd}（输入 help 查看可用命令）`);
-    }
-    rl.prompt();
+function cmdClear(rl) {
+  rl.question('确认清空所有数据? [y/N] ', ans => {
+    if (ans.toLowerCase() === 'y') { tree = new KnowledgeTree(); saveData(); console.log('已清空'); }
+    else console.log('已取消');
   });
 }
 
-main();
+async function processCommand(rl, input) {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const args = parts.slice(1);
+  switch (cmd) {
+    case 'help': case '?': printHelp(); break;
+    case 'list': case 'ls': case 'tree': cmdList(); break;
+    case 'view': case 'show': cmdView(args[0]); break;
+    case 'touch': cmdTouch(args[0]); break;
+    case 'decay': cmdDecay(); break;
+    case 'add': cmdAdd(args); break;
+    case 'note': cmdNote(args.join(' ')); break;
+    case 'idea': cmdIdea(args.join(' ')); break;
+    case 'parse': await cmdParse(rl, args.join(' ')); break;
+    case 'crystal': await cmdCrystal(rl); break;
+    case 'crystallize': cmdCrystallize(args); break;
+    case 'cross': cmdCross(); break;
+    case 'inspire': await cmdInspire(rl, args.join(' ')); break;
+    case 'grow': await cmdGrow(rl, args[0]); break;
+    case 'seed': cmdSeed(args[0]); break;
+    case 'export-md': cmdExportMd(args[0]); break;
+    case 'export-html': cmdExportHtml(args[0]); break;
+    case 'inspect': cmdInspect(); break;
+    case 'clear': cmdClear(rl); break;
+    case 'exit': case 'quit': case 'q': console.log('再见 🌳'); rl.close(); process.exit(0);
+    default: console.log('未知命令:', cmd, '（输入 help 查看命令列表）');
+  }
+}
+
+function main() {
+  console.log('🌳 ODDM 认知树 CLI');
+  console.log('输入 help 查看命令，exit 退出');
+  if (tree.nodes.size === 0) console.log('提示: 树为空，可运行 "seed oddm-knowledge" 导入示例数据');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'ctree> ' });
+  rl.prompt();
+  rl.on('line', async line => { await processCommand(rl, line); rl.prompt(); });
+  rl.on('close', () => { saveData(); console.log('数据已保存'); });
+}
+
+if (require.main === module) main();
+
+module.exports = { processCommand, KnowledgeTree, KnowledgeNode, DoubaoParser, SchemaValidator };
