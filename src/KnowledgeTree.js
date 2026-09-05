@@ -50,9 +50,7 @@ class KnowledgeTree {
   }
 
   /**
-   * 添加节点到树中
-   * @param {KnowledgeNode} node - 要添加的节点
-   * @returns {KnowledgeNode} 添加的节点
+   * 添加节点
    */
   addNode(node) {
     this.nodes.set(node.node_id, node);
@@ -60,17 +58,15 @@ class KnowledgeTree {
   }
 
   /**
-   * 根据 ID 获取节点
-   * @param {string} node_id - 节点ID
-   * @returns {KnowledgeNode|null} 节点对象，不存在返回 null
+   * 获取节点
    */
   getNode(node_id) {
     return this.nodes.get(node_id) || null;
   }
 
   /**
-   * 按主干坐标查询所有节点
-   * @param {'生'|'业'|'思'} axis - 主干坐标
+   * 按主干坐标查询
+   * @param {'生'|'业'|'思'} axis
    * @returns {KnowledgeNode[]}
    */
   getByAxis(axis) {
@@ -78,9 +74,7 @@ class KnowledgeTree {
   }
 
   /**
-   * 获取某节点的直接子节点（同主干）
-   * @param {string} parent_id - 父节点ID
-   * @returns {KnowledgeNode[]}
+   * 获取某节点的直接子节点
    */
   getChildren(parent_id) {
     const parent = this.getNode(parent_id);
@@ -92,9 +86,6 @@ class KnowledgeTree {
 
   /**
    * 注意某个节点——热力上升
-   * 对应用户的注意力投射到这个知识点上
-   * @param {string} node_id - 节点ID
-   * @returns {KnowledgeNode|null}
    */
   touchNode(node_id) {
     const node = this.getNode(node_id);
@@ -104,7 +95,6 @@ class KnowledgeTree {
 
   /**
    * 全树自然衰减——时间流逝
-   * 所有节点热力下降，模拟时间流逝后知识的自然褪色
    */
   decayAll() {
     for (const node of this.nodes.values()) {
@@ -125,9 +115,8 @@ class KnowledgeTree {
   /**
    * 执行结晶——将一个底层节点升维为高阶原理
    * 必须显式调用，系统不会自动结晶
-   * @param {string} node_id - 要结晶的节点ID
+   * @param {string} node_id
    * @param {string} new_summary - 结晶后的高阶原理表述
-   * @returns {KnowledgeNode|null}
    */
   crystallize(node_id, new_summary) {
     const node = this.getNode(node_id);
@@ -141,8 +130,6 @@ class KnowledgeTree {
   /**
    * 发现跨干关联——不同主干但有相同隐性标签的节点
    * 基于隐性标签（复利/解耦/熵增...）触发跨界启发
-   * 算法：按隐性标签分组，同标签但不同主干的节点互相建立关联
-   * @returns {KnowledgeNode[]} 有跨干关联的节点列表
    */
   discoverCrossLinks() {
     // 按隐性标签分组
@@ -153,6 +140,7 @@ class KnowledgeTree {
         tagGroups.get(tag).push(node);
       }
     }
+
     // 同标签但不同主干的节点互相建立跨干关联
     for (const [, group] of tagGroups) {
       for (let i = 0; i < group.length; i++) {
@@ -164,6 +152,7 @@ class KnowledgeTree {
         }
       }
     }
+
     return Array.from(this.nodes.values()).filter(n => n.cross_links.length > 0);
   }
 
@@ -192,7 +181,6 @@ class KnowledgeTree {
 
   /**
    * 快速保存想法——一键存入虚节点（思主干）
-   * AI 生成的想法默认是虚节点，等待用户后续实践验证
    * @param {string} content - 想法完整内容
    * @param {string[]} [implicit_tags=[]] - 隐性标签
    * @returns {KnowledgeNode}
@@ -213,12 +201,46 @@ class KnowledgeTree {
   }
 
   /**
+   * AI 解析摄入——将 AI 解析层产出的节点数据写入树
+   *
+   * 【来源】白皮书 Phase 1（对话→JSON AI 解析层）的落库入口。
+   * 与 addNote/addIdea 的区别：支持完整字段（axis/state/summary/显隐标签），
+   * 由 AI 提炼而非自动截断。
+   *
+   * 【主权在人】AI 只是提议：
+   *   1. 节点写入后不自动挂到任何父节点（parent_hint 仅作提示，父节点不存在则悬空）
+   *   2. state 默认尊重 AI 判定（实=已验证经验 / 虚=待验证构想），用户确认时可见可改
+   *   3. 写入后自动触发跨干关联发现，让隐性标签发挥作用
+   *
+   * @param {Object} parsed - Schema 校验通过的节点数据（{axis,state,summary,explicit_tags,implicit_tags,parent_hint}）
+   * @param {string} rawSource - 原始输入文本（对话/笔记原文）
+   * @returns {KnowledgeNode}
+   */
+  addFromAI(parsed, rawSource) {
+    const id = 'ai_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    const node = new KnowledgeNode({
+      node_id: id,
+      axis: parsed.axis,
+      state: parsed.state,
+      summary: parsed.summary.length > 30 ? parsed.summary.slice(0, 30) + '…' : parsed.summary,
+      raw_source: rawSource,
+      explicit_tags: parsed.explicit_tags || [],
+      implicit_tags: parsed.implicit_tags || [],
+    });
+    this.addNode(node);
+    // parent_hint 若指向已存在节点，则挂载为其子节点（提议执行，结构权仍归用户确认）
+    if (parsed.parent_hint && this.nodes.has(parsed.parent_hint)) {
+      const parent = this.nodes.get(parsed.parent_hint);
+      if (parent && parent.axis === parsed.axis) {
+        parent.children_ids.push(node.node_id);
+      }
+    }
+    this.discoverCrossLinks();
+    return node;
+  }
+
+  /**
    * 截断文本用于 summary
-   * 超过 maxLen 的文本截断并添加省略号
-   * @param {string} text - 原始文本
-   * @param {number} maxLen - 最大长度
-   * @returns {string}
-   * @private
    */
   _truncate(text, maxLen) {
     if (text.length <= maxLen) return text;
@@ -255,14 +277,17 @@ class KnowledgeTree {
     lines.push('═══════════════════════════════════════════════════');
     lines.push('                🌳 ODDM 认知树');
     lines.push('═══════════════════════════════════════════════════');
+
     for (const axis of ['生', '业', '思']) {
       const axisNodes = this.getByAxis(axis);
       lines.push('');
       lines.push(`【${axis}】`);
+
       if (axisNodes.length === 0) {
         lines.push('  └── (空)');
         continue;
       }
+
       // 构建 children map
       const childrenMap = new Map();
       const allChildIds = new Set();
@@ -273,10 +298,12 @@ class KnowledgeTree {
         childrenMap.set(node.node_id, children);
         for (const c of children) allChildIds.add(c.node_id);
       }
+
       // 根节点：没有被任何节点作为子节点的，按热力排序
       const roots = axisNodes
         .filter(n => !allChildIds.has(n.node_id))
         .sort((a, b) => b.heat_score - a.heat_score);
+
       // 递归渲染
       const renderNode = (node, prefix, isLast) => {
         const connector = isLast ? '└── ' : '├── ';
@@ -290,6 +317,7 @@ class KnowledgeTree {
         const cross = node.cross_links.length > 0 ? ` ↔${node.cross_links.length}` : '';
         const longContent = node.raw_source && node.raw_source.length > 100 ? ' 📄' : '';
         lines.push(`${prefix}${connector}${stateMark} ${levelMark}${node.summary}${implicit} ${heatBars}${cross}${longContent}`);
+
         const children = childrenMap.get(node.node_id) || [];
         if (children.length > 0) {
           const newPrefix = prefix + (isLast ? '    ' : '│   ');
@@ -298,32 +326,27 @@ class KnowledgeTree {
           });
         }
       };
+
       roots.forEach((root, idx) => {
         renderNode(root, '  ', idx === roots.length - 1);
       });
     }
+
     lines.push('');
     lines.push('═══════════════════════════════════════════════════');
     lines.push(`节点总数: ${this.nodes.size} | 实: ${this._countByState('实')} 虚: ${this._countByState('虚')} | 跨干关联: ${Array.from(this.nodes.values()).filter(n => n.cross_links.length > 0).length}`);
     lines.push('快速通道: note "内容" 存笔记 | idea "内容" 存想法');
     lines.push('═══════════════════════════════════════════════════');
+
     return lines.join('\n');
   }
 
-  /**
-   * 按状态统计节点数量
-   * @param {'虚'|'实'} state
-   * @returns {number}
-   * @private
-   */
   _countByState(state) {
     return Array.from(this.nodes.values()).filter(n => n.state === state).length;
   }
 
   /**
    * 全树自省快照——对齐 ODDM introspect 理念
-   * 提供树的全局统计信息和所有节点数据，是 AI 操作的入口
-   * @returns {Object}
    */
   introspect() {
     return {
@@ -343,9 +366,7 @@ class KnowledgeTree {
   }
 
   /**
-   * 序列化——导出扁平数据数组，用于持久化
-   * 与 toJSON() 的嵌套结构不同，这里输出扁平结构便于 JSON 文件存储
-   * @returns {Array}
+   * 序列化——导出纯数据数组，用于持久化
    */
   toJSON() {
     return Array.from(this.nodes.values()).map(n => ({
