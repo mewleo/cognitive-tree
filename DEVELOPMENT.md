@@ -272,79 +272,130 @@
 
 ## 四、实现路径（演进路线）
 
-### 与白皮书 Phase 对齐
+### 4.1 两层架构：基础设施层 vs 智能行为层
 
-| 白皮书 Phase | 内容 | 当前状态 | 对应本路线图 |
-|-------------|------|---------|-------------|
-| Phase 1 | 数据解析与 Schema 校验（对话→标准 JSON） | 🚧 首步落地（parse 命令 + Schema 校验） | 阶段二（AI 解析层） |
-| Phase 2 | ODDM 对象持久化与查询 | ⏳ JSON 中间态 | 阶段五（ODDM 持久化） |
-| Phase 3 | 热力计算与 CLI 文本树 | ✅ 已完成 | 阶段一 |
-| Phase 4 | 极简 SVG 动态渲染 | ✅ 已完成（树状布局，偏离白皮书放射状，用户决策） | 阶段一/二 |
+白皮书的 4 个 Phase 是**基础设施层**（解析、持久化、热力、渲染），而白皮书第 4 节的"关键动态机制"是**智能行为层**（在基础设施之上、由 AI 驱动的认知行为）。两者性质不同，不能混排——此前路线图把认知结晶、跨界启发标记为"✅ 已完成"，实际只完成了手动/静态版，AI 驱动的智能行为零进度。
 
-### 阶段一：CLI 核心验证（当前 ✅）
+**落地原则**：基础设施就位后，智能行为层才是产品灵魂，按依赖顺序逐个落地。
 
-- [x] KnowledgeNode 类（六维属性+行为方法）
-- [x] KnowledgeTree 类（聚合根，核心机制）
-- [x] CLI 交互（命令行入口，快速通道）
-- [x] 热力驱动（touch/decay）
-- [x] 认知结晶（suggest/crystallize）
-- [x] 跨干启发（discoverCrossLinks）
-- [x] ASCII 树形渲染（干支叶层级）
-- [x] JSON 持久化（ctree_data.json）
-- [x] export-md 导出
-- [x] export-html 导出（SVG 树状布局）
-- [x] 种子数据（33个 ODDM 知识点）
-- [x] AI 解析层首步落地（parse 命令：豆包 API → Schema 校验 → 用户确认 → 写入）
-- [x] 65项单元测试全过（KnowledgeNode 12 + KnowledgeTree 25 + schema-validator 14 + ai-parser 14）
+### 4.2 基础设施层（白皮书 4 Phase）
 
-### 阶段二：AI 解析层深化（当前 ✅ 首步，深化可选）
+| 白皮书 Phase | 内容 | 当前状态 |
+|-------------|------|---------|
+| Phase 1 | 数据解析与 Schema 校验（对话→标准 JSON） | 🚧 首步落地（parse 命令 + Schema 校验 + forceFetch） |
+| Phase 2 | ODDM 对象持久化与查询 | ⏳ JSON 中间态（ctree_data.json） |
+| Phase 3 | 热力计算与 CLI 文本树 | ✅ 已完成 |
+| Phase 4 | 极简 SVG 动态渲染 | ✅ 已完成（树状布局，偏离白皮书放射状，用户决策） |
 
-- [x] 对话 → KnowledgeNode JSON（parse 命令，豆包 API 接入）
-- [x] Schema 校验（schema-validator.js：轴/状态/摘要/标签/红线3）
-- [x] 用户确认流程（y 写入 / n 放弃 / e 修改主干状态）
-- [x] addFromAI 落库通道（完整字段 + parent_hint 挂载提议 + 自动跨干）
-- [ ] 批量解析（一次多段文本 → 多节点）
-- [ ] 提炼标签复用（AI 基于树内既有标签池对齐，防同义词泛滥）
+**基础设施层后续待办：**
+- Phase 1 深化：批量解析（一次多段文本→多节点）、标签池对齐（防同义词泛滥）
+- Phase 2：接入真实 ODDM（github.com/mewleo/oddm）替代 JSON
+- Web 应用 + Docker/桌面部署
 
-### 阶段三：Web 应用基础（下一步）
+### 4.3 智能行为层（关键动态机制，产品灵魂）
 
-- [ ] 后端 REST API（Node.js + Express/Fastify）
-  - [ ] GET /api/nodes（列表/查询/过滤）
-  - [ ] POST /api/nodes（创建）
-  - [ ] PUT /api/nodes/:id（更新）
-  - [ ] DELETE /api/nodes/:id（删除）
-  - [ ] POST /api/nodes/:id/touch（热力上升）
-  - [ ] POST /api/decay（全树衰减）
-  - [ ] GET /api/crystallization（结晶提议）
-  - [ ] POST /api/crystallization/:id（执行结晶）
-  - [ ] POST /api/cross-links（重新发现跨干关联）
-  - [ ] GET /api/export/md（导出 MD）
-  - [ ] GET /api/export/html（导出 HTML）
-  - [ ] POST /api/import（批量导入）
-- [ ] 前端基础框架
-  - [ ] SVG 知识树视图（可缩放/折叠/层级设定）
-  - [ ] 知识录入表单（手动录入）
-  - [ ] 节点详情面板（查看/编辑）
-  - [ ] 管理面板（全局设置/默认层级）
+按落地顺序排列，每个功能标注依赖、交付标准和交互设计。
 
-### 阶段四：AI 集成深化
+---
 
-- [x] AI 适配器层（DoubaoParser，fetch 可注入，默认豆包 API）
-- [x] 知识提炼管道（对话/文档 → KnowledgeNode JSON → 用户确认）
-- [x] 标签自动生成（AI 提取 explicit_tags / implicit_tags）
-- [ ] 跨域启发（AI 基于 cross_links 生成启发建议）
-- [ ] 知识水平评估（基于 state/level/heat/children 生成领域掌握度）
-- [ ] 个人偏好背书（AI 回答时引用用户的实节点知识）
-- [ ] 头脑风暴扩展（AI 基于高热力领域生成延伸构想）
+#### 功能一：认知结晶 AI 化（下一步，优先级最高）
 
-### 阶段五：ODDM 持久化 + 部署
+**白皮书依据**：第 4 节"认知结晶" + Meta-Prompt 规则 4（解析时若判定可归纳必须发起提议）。
 
-- [ ] 接入 ODDM（github.com/mewleo/oddm）替代 JSON 文件
-- [ ] SQLite 持久化
-- [ ] 事务支持（结晶/跨干关联的原子操作）
-- [ ] Docker 镜像 + docker-compose
-- [ ] 桌面端（Electron 包裹或本地启动）
-- [ ] 多用户支持（认证/权限/数据隔离）
+**当前缺口**：只有手动 `crystal` 查看条件 + 手动 `crystallize <id> <表述>` 执行。AI 不参与检测、不生成表述。
+
+**依赖**：parse（已落地）+ suggestCrystallization（已存在）。
+
+**交付标准**：
+1. parse 写入新节点后，自动扫描全树检测是否有节点满足结晶条件（level≤1 且 children≥3）
+2. 若有可结晶节点，**单独调一次 AI**（用户确认：多调用没坏处，AI 理解更透彻），基于该节点的所有子节点内容生成高阶第一性原理表述
+3. 向用户发起提议："检测到 [节点X] 可结晶，AI 建议升维为『XXX』，是否执行？[y/n]"
+4. 用户确认后执行 crystallize（level+1，更新 summary，子节点落叶化土）
+
+**交互可配置**（用户决策：作为配置参数让用户选择）：
+- 环境变量 `AUTO_CRYSTALLIZE_PROPOSE=1`：在 parse 流程内自动提示结晶提议（无缝但 parse 变长）
+- 未设置（默认）：保持独立 `crystal` 命令，但 `crystal` 升级为 AI 自动生成表述提议（不再需要用户手动输入表述）
+- 两种模式下 `crystallize` 命令仍可手动使用
+
+**主权在人**：AI 只提议，执行必须用户确认。
+
+---
+
+#### 功能二：落叶化土
+
+**白皮书依据**：第 4 节"热力驱动"——"长期不用的知识会自动褪色、折叠（落叶化土），但底层留存"。
+
+**当前缺口**：只有 decay 降低 heat_score 数值，没有"化土"视觉状态。低热力节点和高热力节点在渲染上没有区别。
+
+**依赖**：热力衰减（已存在）+ 渲染（CLI/H5 已存在）。
+
+**交付标准**：
+1. 定义化土阈值（默认 heat_score < 0.3，可配置 `COMPOST_THRESHOLD`）
+2. CLI 渲染：化土节点显示为灰色/缩进折叠，标记 🍂，但仍可通过 `view <id>` 查看完整内容
+3. H5 渲染：化土节点半透明/缩小，hover 可展开
+4. 化土节点被 touch 后唤醒（热力回升，退出化土状态）
+5. 数据永久留存（Meta-Blueprint Dev Notes：溯源不断裂），化土只是视觉表现，不是删除
+
+**设计决策**：化土是**纯视觉表现**，不是新的节点状态（虚/实不变）。白皮书说"褪色、折叠"，没有说变成第三种状态。
+
+---
+
+#### 功能三：AI 跨界启发
+
+**白皮书依据**：第 4 节"隐性标签与跨界启发"——"当用户在业遇到瓶颈时，AI 可通过底层逻辑自动从生/思提取经验，进行跨域启发"。
+
+**当前缺口**：只有静态 `discoverCrossLinks` 基于 implicit_tags 建立跨干关联，AI 不主动生成启发建议。
+
+**依赖**：cross_links（已存在）+ AI 调用（已落地）。
+
+**交付标准**：
+1. 新增 `inspire "瓶颈描述"` 命令
+2. AI 解析用户输入的瓶颈，提取隐性标签
+3. 基于 cross_links 找到其他主干中同隐性标签的节点
+4. AI 综合这些跨干节点的经验，生成结构化的启发建议（不是简单罗列，而是真正的跨界类比）
+5. 启发结果可选择存为新节点（默认虚节点）
+
+**示例**：用户输入 `inspire "团队沟通成本太高"` → AI 提取隐性标签"解耦"→ 找到业主干"ODDM 模块分离"和生主干"家庭分工明确"→ 生成启发："像 ODDM 那样每个角色只暴露标准接口，像家庭分工那样明确边界，沟通成本会暴跌"。
+
+---
+
+#### 功能四：AI 主动扩展学习
+
+**白皮书依据**：第 1 节"自生长" + 第 3 节虚叶"具有引力，主动寻找支撑"。白皮书未用"主动扩展学习"一词，但这是自生长的高级形态。
+
+**当前缺口**：完全没有。树的生长完全依赖用户手动输入或 parse 对话，AI 不主动扩展。
+
+**依赖**：热力数据 + AI 调用 + 前面三个功能的数据积累。
+
+**交付标准**（三个子能力）：
+1. **高热力延伸**：`grow` 命令 → AI 扫描 top-N 高热力节点，基于每个节点的内容和隐性标签生成 2-3 个延伸知识点/问题，提议用户是否存入（默认虚节点）
+2. **知识空白检测**：AI 扫描隐性标签池，发现只有 1 个节点的隐性标签（知识孤岛），提示用户补充相关领域
+3. **虚叶引力**：虚节点（构想/待验证）主动寻找同隐性标签的实节点建立 cross_link，寻找"支撑"——如果一个虚节点找不到任何实节点支撑，提示用户"这个构想还没有实践经验支撑"
+
+**设计原则**：AI 只提议不自动写入（主权在人），扩展内容默认虚节点。
+
+---
+
+### 4.4 落地顺序总览
+
+```
+基础设施层（已基本就位）
+  │
+  ├─ Phase 1 深化（批量解析、标签池对齐）── 可与功能一并行
+  │
+智能行为层（按依赖顺序）
+  │
+  ├─ 功能一：认知结晶 AI 化 ◀── 下一步
+  ├─ 功能二：落叶化土
+  ├─ 功能三：AI 跨界启发
+  └─ 功能四：AI 主动扩展学习
+  │
+基础设施层收尾
+  ├─ Phase 2：ODDM 真实持久化
+  └─ Web 应用 + 部署
+```
+
+**为什么这个顺序**：功能一离 parse 最近（Meta-Prompt 规则 4 本来就要求解析时发起提议），是最自然的延伸；功能二是热力机制的收尾，最简单；功能三依赖 cross_links 数据积累；功能四最复杂，依赖前面所有数据。
 
 ---
 
@@ -383,7 +434,7 @@ node --test test/ai-parser.test.js
  * @returns {KnowledgeNode} 返回值说明
  * @example
  * // 使用示例
- * const result = object.method(param);
+ * const result = object.method();
  */
 ```
 
@@ -447,29 +498,30 @@ docs: 补充开发文档DEVELOPMENT.md
 ```
 cognitive-tree/
 ├── src/
-│   ├── KnowledgeNode.js    # 认知节点实体类（六维属性+行为）
-│   ├── KnowledgeTree.js    # 认知树聚合根（核心机制+渲染+持久化）
-│   ├── ai-parser.js        # 豆包 AI 解析适配器（对话→JSON）
-│   ├── schema-validator.js # Schema 校验器（KnowledgeNode 契约）
-│   ├── meta-prompt.js      # AI 解析系统提示词（规则+红线+Few-Shot）
-│   └── cli.js              # CLI 入口（命令解析+分发+导出+AI解析）
+│   ├── KnowledgeNode.js      # 认知节点实体类（六维属性+行为）
+│   ├── KnowledgeTree.js      # 认知树聚合根（核心机制+渲染+持久化+AI摄入）
+│   ├── ai-parser.js          # 豆包 AI 解析适配器（forceFetch 原生http/https，绕开undici）
+│   ├── schema-validator.js   # KnowledgeNode JSON Schema 校验器
+│   ├── meta-prompt.js        # AI 解析系统提示词（规则+红线+Few-Shot）
+│   └── cli.js                # CLI 入口（命令解析+分发+导出+AI解析）
 ├── test/
-│   ├── KnowledgeNode.test.js  # 节点单元测试（12项）
-│   ├── KnowledgeTree.test.js  # 树单元测试（25项）
-│   ├── schema-validator.test.js # Schema 校验器测试（14项）
-│   └── ai-parser.test.js      # AI 解析适配器测试（14项）
+│   ├── KnowledgeNode.test.js     # 节点单元测试（12项）
+│   ├── KnowledgeTree.test.js     # 树单元测试（25项）
+│   ├── schema-validator.test.js  # Schema 校验器测试（14项）
+│   └── ai-parser.test.js         # AI 解析适配器测试（18项，含forceFetch本地http server）
 ├── seed/
-│   └── oddm-knowledge.json    # ODDM 知识点种子数据（33节点）
+│   └── oddm-knowledge.json   # ODDM 知识点种子数据（33节点）
 ├── docs/
-│   ├── vision-whitepaper.md   # Gemini 原设计文档（项目概念与愿景）
-│   └── meta-blueprint.md      # Meta-Blueprint 元规范（ODDM 契约+Meta-Prompt）
-├── DESIGN.md                  # 核心设计文档（产品定位+六条原则+架构）
-├── DEVELOPMENT.md             # 开发文档（本文档：OOP设计+实现路径+规范）
-├── CHANGELOG.md               # 变更日志
-├── AGENT.md                   # AI Agent 调用指南
-├── README.md                  # 项目说明
-├── package.json               # 项目配置
-└── .gitignore                 # Git 忽略（ctree_data.json 等）
+│   ├── vision-whitepaper.md  # 项目概念与愿景白皮书
+│   └── meta-blueprint.md     # Meta-Blueprint 元规范（ODDM 契约+Meta-Prompt+渲染协议）
+├── diagnose-ark.js           # 火山方舟连接诊断脚本（DNS/TCP/TLS/fetch 逐步排查）
+├── DESIGN.md                 # 核心设计文档（产品定位+六条原则+架构）
+├── DEVELOPMENT.md            # 开发文档（本文档：OOP设计+实现路径+规范）
+├── CHANGELOG.md              # 变更日志
+├── AGENT.md                  # AI Agent 调用指南
+├── README.md                 # 项目说明
+├── package.json              # 项目配置
+└── .gitignore                # Git 忽略（ctree_data.json 等）
 ```
 
 ---
@@ -486,7 +538,7 @@ cd cognitive-tree
 # 运行 CLI（无需安装依赖，零第三方依赖）
 node src/cli.js
 
-# 运行测试
+# 运行测试（用通配符，勿用目录参数 test/，会有环境性假失败）
 node --test test/*.test.js
 ```
 
@@ -504,9 +556,6 @@ note "今天用ODDM重构了存储层"
 
 # 快速存想法
 idea "认知树可以做成浏览器插件"
-
-# AI 解析对话为知识点（需配置 ARK_API_KEY）
-parse "今天调通了Rust的内存释放"
 
 # 查看节点详情
 view <node_id>
