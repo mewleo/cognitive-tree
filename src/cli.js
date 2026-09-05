@@ -352,7 +352,7 @@ const commands = {
     add           添加新节点（交互式完整字段）
     touch <id>    注意某个节点（热力+）
     decay         全树自然衰减（模拟时间流逝）
-    crystal       查看结晶提议
+    crystal       查看结晶提议（配置ARK_API_KEY后AI自动生成高阶表述）
     crystallize <id> <新表述>  执行结晶升维
     cross         重新发现跨干关联
     inspect       全树自省快照（JSON摘要）
@@ -461,16 +461,43 @@ const commands = {
     save();
   },
 
-  crystal() {
+  async crystal(rl) {
     const suggestions = tree.suggestCrystallization(3);
     if (suggestions.length === 0) {
       console.log('暂无满足结晶条件的节点（需要3个以上子节点的底层碎片）');
       return;
     }
     console.log('💎 结晶提议:');
-    suggestions.forEach(n => {
+    const parser = new DoubaoParser();
+    const hasKey = parser.checkKey().ok;
+    for (const n of suggestions) {
+      const children = n.children_ids.map(id => tree.getNode(id)).filter(Boolean);
       console.log(`  ${n.node_id}: "${n.summary}" (子节点: ${n.children_ids.length})`);
-    });
+      if (!hasKey) continue;
+      // 单独调一次 AI 生成高阶表述（用户确认：多调用没坏处，理解更透彻）
+      process.stdout.write('    🤖 AI 归纳中…\r');
+      const r = await parser.summarizeForCrystallization(children);
+      if (!r.ok) {
+        console.log(`    ⚠️ AI归纳失败: ${r.error}（可用 crystallize 手动执行）`);
+        continue;
+      }
+      console.log(`    💡 AI 建议升维为: "${r.summary}"`);
+      const ans = await ask(rl, '    执行结晶？[y=用AI表述 / n=跳过 / m=手动输入] ');
+      const lower = ans.trim().toLowerCase();
+      if (lower === 'y') {
+        const c = tree.crystallize(n.node_id, r.summary);
+        if (c) { save(); console.log(`    ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
+      } else if (lower === 'm') {
+        const manual = await ask(rl, '    输入高阶原理表述: ');
+        if (manual.trim()) {
+          const c = tree.crystallize(n.node_id, manual.trim());
+          if (c) { save(); console.log(`    ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
+        }
+      }
+    }
+    if (!hasKey) {
+      console.log('  💡 配置 ARK_API_KEY 后，crystal 可自动生成高阶表述提议');
+    }
   },
 
   crystallize(id, ...rest) {
@@ -574,6 +601,25 @@ const commands = {
       save();
       console.log(`🌱 已写入 [${d.axis}/${d.state}]: ${node.summary} [${node.node_id}]`);
       console.log('  输入 list 查看树；点击 touch 可提升热力');
+      // 自动结晶提议（可配置：AUTO_CRYSTALLIZE_PROPOSE=1）
+      if (process.env.AUTO_CRYSTALLIZE_PROPOSE === '1') {
+        const newCandidates = tree.suggestCrystallization(3);
+        if (newCandidates.length > 0) {
+          console.log('');
+          console.log('💎 写入后检测到可结晶节点，AI 正在归纳…');
+          for (const cand of newCandidates) {
+            const ch = cand.children_ids.map(id => tree.getNode(id)).filter(Boolean);
+            const cr = await parser.summarizeForCrystallization(ch);
+            if (!cr.ok) { console.log(`  ⚠️ ${cand.node_id} 归纳失败: ${cr.error}`); continue; }
+            console.log(`  ${cand.node_id}: "${cand.summary}" → 💡 "${cr.summary}"`);
+            const ans = await ask(rl, '  执行结晶？[y/n] ');
+            if (ans.trim().toLowerCase() === 'y') {
+              const c = tree.crystallize(cand.node_id, cr.summary);
+              if (c) { save(); console.log(`  ✨ 结晶完成: "${c.summary}" (L${c.level})`); }
+            }
+          }
+        }
+      }
     } else {
       console.log('已放弃，未写入。');
     }
@@ -703,7 +749,7 @@ async function main() {
     }
 
     if (commands[cmd]) {
-      if (cmd === 'add' || cmd === 'parse') {
+      if (cmd === 'add' || cmd === 'parse' || cmd === 'crystal') {
         await commands[cmd](rl, ...args);
       } else {
         commands[cmd](...args);
