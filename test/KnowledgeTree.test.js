@@ -96,11 +96,51 @@ describe('KnowledgeTree', () => {
       }));
 
       const links = tree.discoverCrossLinks();
-      // work1, life1, thought1 都有"解耦"标签，应互相建立跨干关联
       const workNode = tree.getNode('work1');
       const lifeNode = tree.getNode('life1');
       assert.ok(workNode.cross_links.includes('life1') || workNode.cross_links.includes('thought1'));
       assert.ok(lifeNode.cross_links.includes('work1') || lifeNode.cross_links.includes('thought1'));
+    });
+  });
+
+  describe('findCrossNodesByTags（功能三：AI跨界启发前置）', () => {
+    it('应返回其他主干中同隐性标签的节点', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '模块解耦', implicit_tags: ['解耦'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '家庭分工', implicit_tags: ['解耦', '边界'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '哲学分合', implicit_tags: ['解耦'] }));
+      const result = tree.findCrossNodesByTags(['解耦'], '业');
+      assert.strictEqual(result.length, 2);
+      assert.ok(result.every(n => n.axis !== '业'));
+    });
+
+    it('应排除指定主干的节点', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '工作', implicit_tags: ['复利'] }));
+      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '生活', implicit_tags: ['复利'] }));
+      const result = tree.findCrossNodesByTags(['复利'], '生');
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].axis, '业');
+    });
+
+    it('应按热力降序排列', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'l1', axis: '生', state: '实', summary: '低热力', implicit_tags: ['边界'], heat_score: 0.5 }));
+      tree.addNode(new KnowledgeNode({ node_id: 't1', axis: '思', state: '虚', summary: '高热力', implicit_tags: ['边界'], heat_score: 3.0 }));
+      const result = tree.findCrossNodesByTags(['边界'], '业');
+      assert.strictEqual(result[0].node_id, 't1');
+      assert.strictEqual(result[1].node_id, 'l1');
+    });
+
+    it('应限制返回数量', () => {
+      for (let i = 0; i < 8; i++) {
+        tree.addNode(new KnowledgeNode({ node_id: `n${i}`, axis: i % 2 === 0 ? '生' : '思', state: '实', summary: `节点${i}`, implicit_tags: ['熵增'], heat_score: i }));
+      }
+      const result = tree.findCrossNodesByTags(['熵增'], '业', 3);
+      assert.strictEqual(result.length, 3);
+    });
+
+    it('无匹配标签时返回空数组', () => {
+      tree.addNode(new KnowledgeNode({ node_id: 'w1', axis: '业', state: '实', summary: '工作', implicit_tags: ['解耦'] }));
+      const result = tree.findCrossNodesByTags(['不存在的标签'], '业');
+      assert.strictEqual(result.length, 0);
     });
   });
 
@@ -130,7 +170,7 @@ describe('KnowledgeTree', () => {
       const longContent = '这是一段很长的笔记内容，包含了很多细节和思考过程，用于测试大内容索引机制是否正常工作，raw_source应该保存完整内容而summary只显示前30个字';
       const node = tree.addNote(longContent);
       assert.strictEqual(node.raw_source, longContent);
-      assert.ok(node.summary.length <= 33); // 30字 + '...'
+      assert.ok(node.summary.length <= 33);
       assert.ok(node.summary.endsWith('...'));
     });
 
@@ -176,7 +216,6 @@ describe('KnowledgeTree', () => {
       assert.ok(output.includes('父节点'));
       assert.ok(output.includes('子节点1'));
       assert.ok(output.includes('子节点2'));
-      // 子节点应该有树形缩进符号
       const childLine = output.split('\n').find(l => l.includes('子节点1'));
       assert.ok(childLine.includes('└') || childLine.includes('├') || childLine.includes('│'));
     });
@@ -218,7 +257,7 @@ describe('KnowledgeTree', () => {
         explicit_tags: [],
         implicit_tags: [],
       }, '原文');
-      assert.ok(node.summary.length <= 31); // 30字 + '…'
+      assert.ok(node.summary.length <= 31);
       assert.ok(node.summary.endsWith('…'));
     });
 
